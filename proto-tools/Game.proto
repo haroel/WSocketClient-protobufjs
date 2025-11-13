@@ -1,0 +1,23 @@
+syntax = "proto3";
+package game.protobuf;
+
+option java_package = "com.game.protobuf";
+option csharp_namespace = "GameFramework.Protobuf";
+
+
+// 登录请求
+message LoginReq {
+  // 账号id
+  string accountId = 1;
+}
+
+// 登录响应
+message LoginResp {
+  // 用户id
+  int64 userId = 1;
+}
+
+// 登录错误消息
+message LoginErrData {
+
+}

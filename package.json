@@ -1,0 +1,15 @@
+{
+  "name": "WSocketClient-protobufjs",
+  "uuid": "e12b3928-52bd-4229-891c-d0bf611fe452",
+  "creator": {
+    "version": "3.8.7"
+  },
+  "scripts": {
+    "build": "node wsockets/build.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "protobufjs-cli": "^1.1.3",
+    "typescript": "^5.0.0"
+  }
+}
