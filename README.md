@@ -334,7 +334,8 @@ export const proto_config = {
 
 1. 修改`.proto`或.csv配置，都必须重新运行一遍`_convert.bat`重新生成`proto.ts`
 2. `proto.ts`只能用工具生成，请勿二次修改，如遇到bug或有定制需求可联系我们
-2. 在CocosCreator编辑器中，将`protobuf.min.js`和`WSocketClient.js`设成`导入为插件`并勾选支持平台，操作完成后，记得勾选☑️
+3. 在CocosCreator编辑器中，将`protobuf.min.js`和`WSocketClient.js`设成`导入为插件`并选择支持平台，最后勾选☑️
+4. 日志过滤请用标识 `WSocket`
 
 
 
