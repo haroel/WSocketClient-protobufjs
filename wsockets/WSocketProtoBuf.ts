@@ -7,22 +7,22 @@ let traceError = function (...args) {
     console.error("WSocketProtoBuf", ...args);
 }
 
-function recursivelyConvertLongs(obj: any, protobufLong: any) {
+function longToNumber(obj: any, protobufLong: any) {
     if (obj === null || obj === undefined) return;
     if (Array.isArray(obj)) {
         for (let i = 0; i < obj.length; i++) {
-            if (obj[i] instanceof protobufLong) {
+            if (protobufLong.isLong(obj[i])) {
                 obj[i] = obj[i].toNumber();
             } else if (typeof obj[i] === "object" && obj[i] !== null) {
-                recursivelyConvertLongs(obj[i], protobufLong);
+                longToNumber(obj[i], protobufLong);
             }
         }
     } else if (typeof obj === "object") {
         for (const key of Object.keys(obj)) {
-            if (obj[key] instanceof protobufLong) {
+            if (protobufLong.isLong(obj[key])) {
                 obj[key] = obj[key].toNumber();
             } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                recursivelyConvertLongs(obj[key], protobufLong);
+                longToNumber(obj[key], protobufLong);
             }
         }
     }
@@ -183,7 +183,7 @@ export class WSocketProtoBuf {
             }
             let dataResponse = dataMessage.decode(buffer);
             // 递归循环遍历dataResponse的值， 判断值是否是long，然后调用toNumber();
-            recursivelyConvertLongs(dataResponse, this.protobuf.Long);
+            longToNumber(dataResponse, this.protobuf.Long);
             return dataResponse;
         } catch (error) {
             traceError(` - Error: ${WSMessage.DECODE_MESSAGE_FAILED} error: ${error.toString()}`, error);
