@@ -24,6 +24,7 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
  * 使用 protobuf 进行消息序列化和反序列化
  */
 export class WSocketClient {
+    public static readonly VERSION = '1.0';
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -165,6 +166,7 @@ export class WSocketClient {
      */
     public static getInstance() {
         if (!WSocketClient._instance) {
+            trace("v", WSocketClient.VERSION);
             WSocketClient.protobuf = __global.protobuf;
             WSocketClient._instance = new WSocketClient();
         }
