@@ -12,6 +12,7 @@ let traceError = function (...args) {
 }
 
 export type WebSocketInterface = {
+    binaryType: string,
     url: string,
     onopen: Function,
     onmessage: Function,
@@ -34,16 +35,17 @@ export class WSocket {
 
     public ws: WebSocketInterface = null;
 
-    private _eventcallback: (event: string, data: any) => void = null;
+    private _callback: (event: string, data: any) => void = null;
 
     public opts = {
         retry: 1,
-        interval: 1000
+        interval: 1000,
+        cacert: ""
     }
 
     private _reconnectTimer = null;
 
-    constructor(serverURL: string, opts: { retry: number, interval: number }) {
+    constructor(serverURL: string, opts:(typeof this.opts)) {
         this.url = serverURL;
         this.opts = opts;
         this.connect(serverURL);
@@ -54,7 +56,7 @@ export class WSocket {
             clearTimeout(this._reconnectTimer);
             this._reconnectTimer = null;
         }
-        this._eventcallback = null;
+        this._callback = null;
         this.close();
     }
     /**
@@ -72,8 +74,15 @@ export class WSocket {
         }
         trace(`connect ${this.url}`);
         // let AdapterWebSocket = wshandlerHelper.getWebSocketClass();
-        // Android 必须加入CA证书才能使用wss
-        let ws = new WSocket.class(this.url);
+        let AdapterWebSocket: any = WSocket.class;
+        let ws : WebSocketInterface = null;
+        if(this.opts.cacert) {
+           //android平台，低版本引擎ws需要加入CA证书才能使用wss
+            ws = new AdapterWebSocket(this.url, [], this.opts.cacert);
+            trace("cacert", this.opts.cacert);
+        } else {
+            ws = new AdapterWebSocket(this.url);
+        }
         ws.binaryType = "arraybuffer";
         ws.onopen = (event) => {
             this.onopen(ws, event)
@@ -132,14 +141,14 @@ export class WSocket {
      * @param eventcallback 
      */
     public on(eventcallback: (event: "onmessage" | "onopen" | "onclose" | "onerror", data: any) => void) {
-        this._eventcallback = eventcallback;
+        this._callback = eventcallback;
     }
 
     private onopen(ws: WebSocketInterface, event) {
         trace(`${this.url} onopen ${ws["uuid"]} `)
         if (this.ws && ws["uuid"] === this.ws["uuid"]) {
             this.opts.retry = 0;
-            this._eventcallback("onopen", event)
+            this._callback("onopen", event)
         }
     }
 
@@ -149,7 +158,7 @@ export class WSocket {
             if (this.opts.retry > 0) {
                 return this._reconnect();
             }
-            this._eventcallback("onerror", event)
+            this._callback("onerror", event)
         }
     }
     private onclose(ws: WebSocketInterface, event) {
@@ -158,12 +167,12 @@ export class WSocket {
             if (this.opts.retry > 0) {
                 return this._reconnect();
             }
-            this._eventcallback("onclose", event)
+            this._callback("onclose", event)
         }
     }
     private onmessage(ws: WebSocketInterface, event) {
         if (this.ws && ws["uuid"] === this.ws["uuid"]) {
-            this._eventcallback("onmessage", event.data)
+            this._callback("onmessage", event.data)
         }
     }
 }

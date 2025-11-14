@@ -153,7 +153,7 @@ declare class WSocketClient {
      */
     static readonly CONNECTTED = 3;
     /**
-     * protobufjs 对象
+     * protobufjs 原始对象
      * 用于 protobuf 消息的序列化和反序列化
      */
     static protobuf: any;
@@ -216,12 +216,17 @@ declare class WSocketClient {
          */
         autoReconnect: boolean;
         /**
+         * 【Android】wss连接pem证书，CocosCreator3.5+以上不再需要此参数
+         * 参考 https://forum.cocos.org/t/topic/151320/4
+         */
+        cacert: string;
+        /**
          * 状态变化回调函数
          * @param state 新的连接状态（NONE、DISCONNECTED、CONNECTING、CONNECTTED）
          */
         onStateChange: (...args: any[]) => void;
         /**
-         * 连接超时回调函数
+         * 连接超时回调函数（主动断开连接）
          * 当连接超时时触发
          */
         onConnectTimeout: (...args: any[]) => void;
@@ -236,12 +241,12 @@ declare class WSocketClient {
          */
         onAutoReconnectEnd: (...args: any[]) => void;
         /**
-         * 协议超时回调函数
+         * 协议超时回调函数（不会主动断开连接）
          * @param request 超时的请求对象，包含 seqId、time、msgName 等信息
          */
         onProtocolTimeout: (...args: any[]) => void;
         /**
-         * 心跳超时回调函数
+         * 心跳超时回调函数（主动断开连接）
          * 当心跳响应超时时触发
          */
         onHeartbeatTimeout: (...args: any[]) => void;
@@ -267,7 +272,7 @@ declare class WSocketClient {
         onError: (...args: any[]) => void;
         /**
          * 消息接收回调函数
-         * 当收到服务器消息时触发（在消息分发到具体回调之前）
+         * 当收到服务器消息时触发（在消息分发到具体回调之前触发，可以在这里对消息进行统一拦截处理）
          * @param msg 解码后的外部消息对象
          */
         onMessage: (msg: any) => void;
@@ -392,4 +397,10 @@ declare class WSocketClient {
      * @param callback 可选，要移除的特定回调函数。如果不传此参数，则删除该消息名称下的所有回调函数
      */
     offNTF(msgName: string, callback?: (msgName: string, playload: any) => void): void;
+    /**
+     * 停止ticker检测
+     */
+    /**
+     * 发送心跳包
+     */
 }

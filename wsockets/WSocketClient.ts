@@ -44,7 +44,7 @@ export class WSocketClient {
     public static readonly CONNECTTED = 3;
 
     /**
-     * protobufjs 对象
+     * protobufjs 原始对象
      * 用于 protobuf 消息的序列化和反序列化
      */
     public static protobuf: any = __global.protobuf;
@@ -100,13 +100,19 @@ export class WSocketClient {
          * @default true
          */
         autoReconnect: true,
+
+        /**
+         * 【Android】wss连接pem证书，CocosCreator3.5+以上不再需要此参数
+         * 参考 https://forum.cocos.org/t/topic/151320/4
+         */
+        cacert: "",
         /**
          * 状态变化回调函数
          * @param state 新的连接状态（NONE、DISCONNECTED、CONNECTING、CONNECTTED）
          */
         onStateChange: generateCallback("onStateChange"),
         /**
-         * 连接超时回调函数
+         * 连接超时回调函数（主动断开连接）
          * 当连接超时时触发
          */
         onConnectTimeout: generateCallback("onConnectTimeout"),
@@ -121,12 +127,12 @@ export class WSocketClient {
          */
         onAutoReconnectEnd: generateCallback("onAutoReconnectEnd"),
         /**
-         * 协议超时回调函数
+         * 协议超时回调函数（不会主动断开连接）
          * @param request 超时的请求对象，包含 seqId、time、msgName 等信息
          */
         onProtocolTimeout: generateCallback("onProtocolTimeout"),
         /**
-         * 心跳超时回调函数
+         * 心跳超时回调函数（主动断开连接）
          * 当心跳响应超时时触发
          */
         onHeartbeatTimeout: generateCallback("onHeartbeatTimeout"),
@@ -152,7 +158,7 @@ export class WSocketClient {
         onError: generateCallback("onError"),
         /**
          * 消息接收回调函数
-         * 当收到服务器消息时触发（在消息分发到具体回调之前）
+         * 当收到服务器消息时触发（在消息分发到具体回调之前触发，可以在这里对消息进行统一拦截处理）
          * @param msg 解码后的外部消息对象
          */
         onMessage: function (msg) { },
@@ -360,12 +366,14 @@ export class WSocketClient {
         if (!this._wsocket) {
             this._wsocket = new WSocket(serverURL, {
                 retry: this.config.connectRetry,
-                interval: this.config.connectInterval
+                interval: this.config.connectInterval,
+                cacert: this.config.cacert
             });
             this._wsocket.on(this._wsHandler.bind(this))
         } else {
             this._wsocket.opts.interval = this.config.connectInterval;
             this._wsocket.opts.retry = this.config.connectRetry;
+            this._wsocket.opts.cacert = this.config.cacert;
             this._wsocket.connect(serverURL);
         }
     }
@@ -473,7 +481,7 @@ export class WSocketClient {
         }
     }
 
-    private _data(data:any){
+    private _data(data: any) {
         let external_ = this.protobufHelper.decodeExternalMessage(data);
         if (external_) {
             this.config.onMessage && this.config.onMessage(external_);
@@ -577,7 +585,9 @@ export class WSocketClient {
                 if ((Date.now() - this._connectTime) > this.config.connectTimeout) {
                     // 连接超时
                     trace(` - Error: ${WSMessage.CONNECT_TIMEOUT} connectTimeout: ${this.config.connectTimeout}`);
+                    this.close();
                     this.config.onConnectTimeout && this.config.onConnectTimeout();
+                    this.config.onClose && this.config.onClose();
                 }
                 break;
             }
@@ -590,18 +600,24 @@ export class WSocketClient {
                     trace(` - Error: ${WSMessage.HEARTBEAT_TIMEOUT} heartbeatTimeout: ${this.config.heartbeatTimeout}`);
                     this.close();
                     this.config.onHeartbeatTimeout && this.config.onHeartbeatTimeout();
+                    this.config.onClose && this.config.onClose();
                 }
                 break;
             }
         }
     }
+    /**
+     * 停止ticker检测
+     */
     private _stopTicker() {
         if (this._ticker) {
             clearInterval(this._ticker);
             this._ticker = null;
         }
     }
-
+    /**
+     * 发送心跳包
+     */
     private _sendHeartbeat() {
         this._lastHeartbeatTime = Date.now();
         this.send("PingReq", { clientTime: Date.now() }, (msgName: string, response: any) => {

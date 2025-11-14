@@ -1,6 +1,6 @@
 # WSocketClient-protobufjs
 
-一个基于 WebSocket 和 Protobuf 的客户端通信库，支持自动重连、心跳检测、消息序列化等功能。
+一个基于 WebSocket 和 Protobuf 的适用于CocosCreator等JS运行环境的通信库，支持自动重连、心跳检测、消息序列化等功能。
 
 ## 功能特性
 
@@ -19,17 +19,18 @@
 
 ```
 WSocketClient-protobufjs/
-├── proto-tools/          # Protobuf 转换工具
-│   ├── _convert.js       # 转换脚本
-│   ├── _convert.bat      # Windows 批处理脚本
-│   ├── _convert.sh       # Linux/Mac Shell 脚本
-│   ├── *.proto          # Protobuf 定义文件
-│   └── ProtoConfig.csv   # 协议配置表
-├── assets/wsockets/      # 构建输出目录
-│   ├── protobuf.min.js   # Protobuf 库文件（需导入为插件）
-│   ├── WSocketClient.js  # 打包后的 JS 文件（需导入为插件）
+├── proto-tools/           # Protobuf 转换工具
+│   ├── _convert.js        # 转换脚本
+│   ├── _convert.bat       # Windows 批处理脚本
+│   ├── _convert.sh        # Linux/Mac Shell 脚本
+│   ├── *.proto            # Protobuf 定义文件（服务器方提供）
+│   └── ProtoConfig.csv    # 协议配置表（服务器方提供）
+├── assets/wsockets/       # 构建输出目录
+│   ├── protobuf.min.js    # Protobuf 库文件（需导入为插件）
+│   ├── WSocketClient.js   # 打包后的 JS 文件（需导入为插件）
 │   ├── WSocketClient.d.ts # TypeScript 声明文件
-│   └── proto.ts         # 生成的协议文件
+│   └── proto.ts           # _convert工具生成的协议文件
+├── cacert.pem             # 【可选】SSL/TLS 证书文件（Android wss 连接需要，CocosCreator 3.5+ 不需要）
 └── package.json
 ```
 
@@ -37,21 +38,11 @@ WSocketClient-protobufjs/
 
 ## 安装
 
-### 1. 安装依赖
+###  安装依赖
 
 ```bash
 npm install
 ```
-
-### 2. 构建库文件
-
-```bash
-npm run build
-```
-
-构建完成后，会在 `assets/wsockets/` 目录下生成：
-- `WSocketClient.js` - 打包后的 JavaScript 文件
-- `WSocketClient.d.ts` - TypeScript 类型声明文件
 
 
 ## 使用 WSocketClient
@@ -107,7 +98,9 @@ client.config = {
     protocolTimeout: 10000,         // 协议超时（毫秒），默认 10000
     heartbeatTimeout: 15000,        // 心跳超时（毫秒），默认 15000
     heartbeatInterval: 5000,        // 心跳间隔（毫秒），默认 5000
-    autoReconnect: true,            // 自动重连，默认 true
+    autoReconnect: true,            // 断线自动重连，默认 true
+    cacert: "",                     // 【Android】wss连接pem证书路径，CocosCreator3.5+以上不再需要此参数
+                                    // 示例: "assets/cacert.pem" 或 "res/cacert.pem"
     
     // 回调函数
     onStateChange: (state) => {     // 状态变化回调
@@ -332,9 +325,9 @@ export const proto_config = {
 
 ## 开发
 
-1. 修改`.proto`或.csv配置，都必须重新运行一遍`_convert.bat`重新生成`proto.ts`
-2. `proto.ts`只能用工具生成，请勿二次修改，如遇到bug或有定制需求可联系我们
-3. 在CocosCreator编辑器中，将`protobuf.min.js`和`WSocketClient.js`设成`导入为插件`并选择支持平台，最后勾选☑️
+1. 修改`.proto`或.csv配置，必须重新运行一遍`_convert.bat`重新生成`proto.ts`
+2. `proto.ts`只能用工具生成，请勿手动修改，如遇到bug或有定制需求可联系我们
+3. CocosCreator编辑器中，将`protobuf.min.js`和`WSocketClient.js`设成`导入为插件`并选择支持平台，最后勾选☑️
 4. 日志过滤请用标识 `WSocket`
 
 
@@ -346,6 +339,7 @@ export const proto_config = {
 3. **消息名称**：发送消息时，`msgName` 必须在 `proto_config` 中已配置
 4. **自动重连**：默认开启自动重连，可通过 `config.autoReconnect` 关闭
 5. **心跳机制**：连接成功后会自动发送心跳包，用于同步服务器时间
+6. **SSL/TLS 证书（Android）**：如果使用 wss 连接且 CocosCreator 版本低于 3.5，需要在 `config.cacert` 中指定证书文件路径（如 `"assets/cacert.pem"`）。CocosCreator 3.5+ 版本不再需要此参数
 
 ## 许可证
 

@@ -21,6 +21,7 @@ echo.
 REM 使用 PowerShell 压缩文件
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$files = @('assets', 'proto-tools', 'settings', 'package.json', 'README.md', 'tsconfig.json');" ^
+    "if (Test-Path 'cacert.pem') { $files += 'cacert.pem' };" ^
     "$zipPath = '%zipfile%';" ^
     "if (Test-Path $zipPath) { Remove-Item $zipPath -Force };" ^
     "$files | ForEach-Object { if (Test-Path $_) { Write-Host \"  添加: $_\" } else { Write-Warning \"  警告: $_ 不存在\" } };" ^
