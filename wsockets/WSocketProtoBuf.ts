@@ -43,8 +43,7 @@ export class WSocketProtoBuf {
     private proto_define: any = null;
     private proto_configs: Map<number, any> = null;
 
-    constructor(protoPackage: string, protobuf: any) {
-        this.protoPackage = protoPackage;
+    constructor(protobuf: any) {
         this.protobuf = protobuf;
         this.Builder = new this.protobuf.Builder();
     }
@@ -53,6 +52,7 @@ export class WSocketProtoBuf {
         proto_define: any,
         proto_configs: Map<number, any>
     }) {
+        this.protoPackage = config.proto_define.package;
         this.proto_define = config.proto_define;
         this.proto_configs = config.proto_configs;
         // 加载 JSON

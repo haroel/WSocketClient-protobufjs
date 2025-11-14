@@ -94,6 +94,12 @@ export class WSocketClient {
          * @default 5000
          */
         heartbeatInterval: 5000,
+
+        /**
+         * WS状态检测间隔时间（毫秒）
+         * @default 1000
+         */
+        tickInterval:1000,
         /**
          * 自动断线重连，默认开启
          * 当连接意外断开时，是否自动尝试重新连接
@@ -127,7 +133,7 @@ export class WSocketClient {
          */
         onAutoReconnectEnd: generateCallback("onAutoReconnectEnd"),
         /**
-         * 协议超时回调函数（不会主动断开连接）
+         * 协议超时回调函数（不会主动断开连接）,每个协议只可能触发一次心跳超时回调
          * @param request 超时的请求对象，包含 seqId、time、msgName 等信息
          */
         onProtocolTimeout: generateCallback("onProtocolTimeout"),
@@ -323,17 +329,15 @@ export class WSocketClient {
      * 必须在调用 connect 之前调用此方法
      * @param proto_config 协议配置对象
      * @param proto_config.protoName 协议名称，通常为 "proto.json"
-     * @param proto_config.package protobuf 包名
      * @param proto_config.proto_define protobuf 定义对象，包含消息和枚举定义
      * @param proto_config.proto_configs 协议配置映射表，Map 类型，key 为 cmdMerge，value 为 [cmdMerge, request, response] 数组
      */
     public setConfig(proto_config: {
         protoName: string,
-        package: string,
         proto_define: any,
         proto_configs: any
     }) {
-        this.protobufHelper = new WSocketProtoBuf(proto_config.package, WSocketClient.protobuf);
+        this.protobufHelper = new WSocketProtoBuf(WSocketClient.protobuf);
         this.protobufHelper.setConfig(proto_config.protoName, {
             proto_define: proto_config.proto_define,
             proto_configs: proto_config.proto_configs
@@ -414,6 +418,10 @@ export class WSocketClient {
                         seqId: seqID,
                         time: Date.now(),
                         msgName: msgName,
+                        /**
+                         * 是否已发送心跳超时
+                         */
+                        sendTimeout:false,
                         callback: callback
                     };
                     this._callbacks.set(seqID, request);
@@ -422,6 +430,7 @@ export class WSocketClient {
             }
             case WSocketClient.CONNECTING: {
                 // 当前正在连接
+                trace(`Error: ${WSMessage.CONNECTING_NOW}`);
                 break;
             }
             default: {
@@ -566,15 +575,18 @@ export class WSocketClient {
         if (this._ticker) {
             return;
         }
-        this._ticker = setInterval(this._tick.bind(this), 1000);
+        this._ticker = setInterval(this._tick.bind(this), this.config.tickInterval);
     }
-
+    /**
+     * WS状态检测
+     */
     private _tick() {
         const protocolTimeout = this.config.protocolTimeout;
         if (protocolTimeout > 0) {
             let nt = Date.now();
             for (let item of this._callbacks.values()) {
-                if ((nt - item.time) > protocolTimeout) {
+                if (!item.sendTimeout && (nt - item.time) > protocolTimeout) {
+                    item.sendTimeout = true;
                     trace(` - Error: ${WSMessage.PROTOCOL_TIMEOUT} : ${item.msgName} seqId: ${item.seqId}`);
                     this.config.onProtocolTimeout && this.config.onProtocolTimeout(item);
                 }
@@ -592,15 +604,16 @@ export class WSocketClient {
                 break;
             }
             case WSocketClient.CONNECTTED: {
-                // 处理心跳超时
                 const nt = Date.now();
-                if ((nt - this._lastHeartbeatTime) > this.config.heartbeatInterval) {
-                    this._sendHeartbeat();
-                } else if ((nt - this._lastHeartbeatResponseTime) > this.config.heartbeatTimeout) {
+                if ((nt - this._lastHeartbeatResponseTime) > this.config.heartbeatTimeout) {
+                    // 心跳响应超时
                     trace(` - Error: ${WSMessage.HEARTBEAT_TIMEOUT} heartbeatTimeout: ${this.config.heartbeatTimeout}`);
                     this.close();
                     this.config.onHeartbeatTimeout && this.config.onHeartbeatTimeout();
                     this.config.onClose && this.config.onClose();
+                } else if ((nt - this._lastHeartbeatTime) > this.config.heartbeatInterval) {
+                    // 心跳间隔，发送一个心跳
+                    this._sendHeartbeat();
                 }
                 break;
             }

@@ -1,7 +1,7 @@
 
 /** 
  * 注意：该脚本由 proto-tools/convert 工具生成，请勿手动修改！
- * 生成时间: 2025-11-13 16:31:39 
+ * 生成时间: 2025-11-14 17:13:37 
  * 工具版本: v1.1 **/
 
 const proto_define = {
@@ -130,7 +130,6 @@ for (let item of configs) {
 }
 export const proto_config = {
   protoName: "proto.json",
-  package: "game.protobuf",
   proto_define: proto_define,
   proto_configs: proto_configs
 }

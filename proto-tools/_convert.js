@@ -305,7 +305,6 @@ for (let item of configs) {
 }
 export const proto_config = {
   protoName: "proto.json",
-  package: ${JSON.stringify(packageName)},
   proto_define: proto_define,
   proto_configs: proto_configs
 }

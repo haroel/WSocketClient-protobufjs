@@ -38,44 +38,11 @@ WSocketClient-protobufjs/
 
 ## 安装
 
-### 方式一：从 GitHub Release 下载（推荐）
-
-1. 访问项目的 [GitHub Releases](https://github.com/your-username/WSocketClient-protobufjs/releases) 页面
-2. 下载最新版本的 `WSocketClient-protobufjs.zip` 文件
-3. 解压到您的项目目录
-4. 运行 `npm install` 安装依赖
-5. 运行 `npm run build` 构建项目（如果需要）
-
-**Release 包中已包含：**
-- ✅ 预构建的 `WSocketClient.js` 和 `WSocketClient.d.ts`
-- ✅ 完整的项目结构和配置文件
-- ✅ 所有必要的工具和文档
-- ✅ `assets/`、`proto-tools/`、`settings/` 等完整目录
-
-**自动 Release：**
-- 每次推送到 `main` 或 `master` 分支时，GitHub Actions 会自动创建 Release
-- 也可以推送 tag（如 `v1.2.0`）来触发 Release
-- Release 会自动包含所有必要的文件并打包成 zip
-
-### 方式二：从源码安装
-
-#### 1. 克隆仓库
-
-```bash
-git clone https://github.com/your-username/WSocketClient-protobufjs.git
-cd WSocketClient-protobufjs
-```
-
-#### 2. 安装依赖
-
+1. 解压框架包zip
+2. 将其中的assets/wsockets和proto-tools拷贝到工程对应目录中
+3. 安装依赖
 ```bash
 npm install
-```
-
-#### 3. 构建项目
-
-```bash
-npm run build
 ```
 
 
@@ -125,49 +92,160 @@ const client = WSocketClient.getInstance();
 
 // 自定义配置
 client.config = {
-    WebSocket: WebSocket,           // WebSocket 类（可替换为自定义实现）
-    connectRetry: 3,                // 连接重试次数，默认 3
-    connectInterval: 5000,          // 重连间隔（毫秒），默认 5000
-    connectTimeout: 10000,          // 连接超时（毫秒），默认 10000
-    protocolTimeout: 10000,         // 协议超时（毫秒），默认 10000
-    heartbeatTimeout: 15000,        // 心跳超时（毫秒），默认 15000
-    heartbeatInterval: 5000,        // 心跳间隔（毫秒），默认 5000
-    autoReconnect: true,            // 断线自动重连，默认 true
-    cacert: "",                     // 【Android】wss连接pem证书路径，CocosCreator3.5+以上不再需要此参数
-                                    // 示例: "assets/cacert.pem" 或 "res/cacert.pem"
+    /**
+     * WebSocket 类构造函数，默认使用浏览器自带的 WebSocket
+     * 可以替换为自定义的 WebSocket 实现（如 Node.js 的 ws 库）
+     */
+    WebSocket: WebSocket,
     
-    // 回调函数
-    onStateChange: (state) => {     // 状态变化回调
+    /**
+     * 连接重试次数
+     * 当连接失败时，最多重试的次数
+     * @default 3
+     */
+    connectRetry: 3,
+    
+    /**
+     * 连接重连间隔（毫秒）
+     * 每次重连之间的等待时间
+     * @default 5000
+     */
+    connectInterval: 5000,
+    
+    /**
+     * 连接超时时间（毫秒）
+     * 从开始连接到连接成功或失败的最大等待时间
+     * @default 10000
+     */
+    connectTimeout: 10000,
+    
+    /**
+     * 协议超时时间（毫秒）
+     * 发送请求后等待响应的最大时间，超过此时间将触发 onProtocolTimeout 回调
+     * @default 10000
+     */
+    protocolTimeout: 10000,
+    
+    /**
+     * 心跳超时时间（毫秒）
+     * 心跳响应超时时间，超过此时间未收到心跳响应将断开连接
+     * @default 15000
+     */
+    heartbeatTimeout: 15000,
+    
+    /**
+     * 心跳间隔时间（毫秒）
+     * 每隔多长时间发送一次心跳包
+     * @default 5000
+     */
+    heartbeatInterval: 5000,
+    
+    /**
+     * WS状态检测间隔时间（毫秒）
+     * @default 1000
+     */
+    tickInterval: 1000,
+    
+    /**
+     * 自动断线重连，默认开启
+     * 当连接意外断开时，是否自动尝试重新连接
+     * @default true
+     */
+    autoReconnect: true,
+    
+    /**
+     * 【Android】wss连接pem证书，CocosCreator3.5+以上不再需要此参数
+     * 参考 https://forum.cocos.org/t/topic/151320/4
+     * 示例: "assets/cacert.pem" 或 "res/cacert.pem"
+     */
+    cacert: "",
+    
+    /**
+     * 状态变化回调函数
+     * @param state 新的连接状态（NONE、DISCONNECTED、CONNECTING、CONNECTTED）
+     */
+    onStateChange: (state) => {
         console.log("状态变化", state);
     },
-    onConnectTimeout: () => {        // 连接超时回调
+    
+    /**
+     * 连接超时回调函数（主动断开连接）
+     * 当连接超时时触发
+     */
+    onConnectTimeout: () => {
         console.log("连接超时");
     },
-    onAutoReconnectStart: () => {   // 自动重连开始
+    
+    /**
+     * 自动重连开始回调函数
+     * 当开始自动重连时触发
+     */
+    onAutoReconnectStart: () => {
         console.log("开始重连");
     },
-    onAutoReconnectEnd: (success) => { // 自动重连结束
+    
+    /**
+     * 自动重连结束回调函数
+     * @param success 重连是否成功
+     */
+    onAutoReconnectEnd: (success) => {
         console.log("重连结果", success);
     },
-    onProtocolTimeout: (request) => { // 协议超时
+    
+    /**
+     * 协议超时回调函数（不会主动断开连接），每个协议只可能触发一次心跳超时回调
+     * @param request 超时的请求对象，包含 seqId、time、msgName 等信息
+     */
+    onProtocolTimeout: (request) => {
         console.log("协议超时", request);
     },
-    onHeartbeatTimeout: () => {      // 心跳超时
+    
+    /**
+     * 心跳超时回调函数（主动断开连接）
+     * 当心跳响应超时时触发
+     */
+    onHeartbeatTimeout: () => {
         console.log("心跳超时");
     },
-    onHeartbeat: () => {             // 心跳回调
+    
+    /**
+     * 心跳回调函数
+     * 每次发送心跳包后触发
+     */
+    onHeartbeat: () => {
         console.log("心跳");
     },
-    onOpen: () => {                  // 连接打开
+    
+    /**
+     * WebSocket 连接打开回调函数
+     * 当 WebSocket 连接成功建立时触发
+     */
+    onOpen: () => {
         console.log("连接已打开");
     },
-    onClose: () => {                 // 连接关闭
+    
+    /**
+     * WebSocket 连接关闭回调函数
+     * 当 WebSocket 连接关闭时触发
+     */
+    onClose: () => {
         console.log("连接已关闭");
     },
-    onError: () => {                 // 连接错误
+    
+    /**
+     * WebSocket 错误回调函数
+     * 当 WebSocket 发生错误时触发
+     */
+    onError: () => {
         console.log("连接错误");
     },
-    onMessage: (msg) => {            // 收到消息（在分发前）
+    
+    /**
+     * 消息接收回调函数
+     * 当收到服务器消息时触发（在消息分发到具体回调之前触发，可以在这里对消息进行统一拦截处理）
+     * @param msg 解码后的外部消息对象
+     */
+    onMessage: (msg) => {
         console.log("收到消息", msg);
     }
 };

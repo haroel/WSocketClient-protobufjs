@@ -18,7 +18,6 @@ declare type WSocketProtoBuf = any;
  */
 declare const WSMessage: {
     /******************** 连接相关错误 (100000-199999) ********************/
-    
     /**
      * 请先调用 setConfig 方法
      * 错误码: 100000
@@ -66,6 +65,13 @@ declare const WSMessage: {
      * 解决方法: 检查服务器心跳处理逻辑
      */
     HEARTBEAT_FAILED: 100005;
+    /**
+     *  当前正在连接，请等待连接完成
+     * 错误码: 100006
+     * 触发场景: 在连接状态为 CONNECTING 时，再次调用 send 方法
+     * 解决方法: 等待当前连接完成后再尝试发送消息
+     */
+    CONNECTING_NOW: 100006;
 
     /******************** 协议处理相关错误 (200000-299999) ********************/
 
@@ -210,6 +216,11 @@ declare class WSocketClient {
          */
         heartbeatInterval: number;
         /**
+         * WS状态检测间隔时间（毫秒）
+         * @default 1000
+         */
+        tickInterval: number;
+        /**
          * 自动断线重连，默认开启
          * 当连接意外断开时，是否自动尝试重新连接
          * @default true
@@ -241,7 +252,7 @@ declare class WSocketClient {
          */
         onAutoReconnectEnd: (...args: any[]) => void;
         /**
-         * 协议超时回调函数（不会主动断开连接）
+         * 协议超时回调函数（不会主动断开连接）,每个协议只可能触发一次心跳超时回调
          * @param request 超时的请求对象，包含 seqId、time、msgName 等信息
          */
         onProtocolTimeout: (...args: any[]) => void;
@@ -341,13 +352,11 @@ declare class WSocketClient {
      * 必须在调用 connect 之前调用此方法
      * @param proto_config 协议配置对象
      * @param proto_config.protoName 协议名称，通常为 "proto.json"
-     * @param proto_config.package protobuf 包名
      * @param proto_config.proto_define protobuf 定义对象，包含消息和枚举定义
      * @param proto_config.proto_configs 协议配置映射表，Map 类型，key 为 cmdMerge，value 为 [cmdMerge, request, response] 数组
      */
     setConfig(proto_config: {
         protoName: string;
-        package: string;
         proto_define: any;
         proto_configs: any;
     }): void;
@@ -379,6 +388,10 @@ declare class WSocketClient {
         seqId: number;
         time: number;
         msgName: string;
+        /**
+         * 是否已发送心跳超时
+         */
+        sendTimeout: boolean;
         callback: (msgName: string, response: any) => void;
     };
     /**
@@ -397,6 +410,9 @@ declare class WSocketClient {
      * @param callback 可选，要移除的特定回调函数。如果不传此参数，则删除该消息名称下的所有回调函数
      */
     offNTF(msgName: string, callback?: (msgName: string, playload: any) => void): void;
+    /**
+     * WS状态检测
+     */
     /**
      * 停止ticker检测
      */
