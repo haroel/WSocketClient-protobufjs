@@ -38,10 +38,44 @@ WSocketClient-protobufjs/
 
 ## 安装
 
-###  安装依赖
+### 方式一：从 GitHub Release 下载（推荐）
+
+1. 访问项目的 [GitHub Releases](https://github.com/your-username/WSocketClient-protobufjs/releases) 页面
+2. 下载最新版本的 `WSocketClient-protobufjs.zip` 文件
+3. 解压到您的项目目录
+4. 运行 `npm install` 安装依赖
+5. 运行 `npm run build` 构建项目（如果需要）
+
+**Release 包中已包含：**
+- ✅ 预构建的 `WSocketClient.js` 和 `WSocketClient.d.ts`
+- ✅ 完整的项目结构和配置文件
+- ✅ 所有必要的工具和文档
+- ✅ `assets/`、`proto-tools/`、`settings/` 等完整目录
+
+**自动 Release：**
+- 每次推送到 `main` 或 `master` 分支时，GitHub Actions 会自动创建 Release
+- 也可以推送 tag（如 `v1.2.0`）来触发 Release
+- Release 会自动包含所有必要的文件并打包成 zip
+
+### 方式二：从源码安装
+
+#### 1. 克隆仓库
+
+```bash
+git clone https://github.com/your-username/WSocketClient-protobufjs.git
+cd WSocketClient-protobufjs
+```
+
+#### 2. 安装依赖
 
 ```bash
 npm install
+```
+
+#### 3. 构建项目
+
+```bash
+npm run build
 ```
 
 

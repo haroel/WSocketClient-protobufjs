@@ -7,9 +7,33 @@ const outdir = path.resolve(__dirname, '../assets/wsockets');
 const outfile = path.join(outdir, 'WSocketClient.js');
 const dtsOutfile = path.join(outdir, 'WSocketClient.d.ts');
 const tempDtsDir = path.resolve(__dirname, 'temp_dts');
+const packageJsonPath = path.resolve(__dirname, '../package.json');
+const wsocketClientPath = path.resolve(__dirname, 'WSocketClient.ts');
 
 // 确保输出目录存在
 fs.mkdirSync(outdir, { recursive: true });
+
+// 读取 WSocketClient.ts 中的 VERSION 并更新 package.json
+try {
+    const wsocketClientContent = fs.readFileSync(wsocketClientPath, 'utf8');
+    const versionMatch = wsocketClientContent.match(/public static readonly VERSION\s*=\s*['"]([^'"]+)['"]/);
+    if (versionMatch && versionMatch[1]) {
+        const version = versionMatch[1];
+        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+        if (packageJson.version !== version) {
+            packageJson.version = version;
+            fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
+            console.log(`✅ Updated package.json version to ${version}`);
+        } else {
+            console.log(`ℹ️  package.json version is already ${version}`);
+        }
+    } else {
+        console.warn('⚠️  Could not find VERSION in WSocketClient.ts');
+    }
+} catch (error) {
+    console.error('❌ Failed to sync version:', error.message);
+    process.exit(1);
+}
 
 build({
     entryPoints: ['wsockets/WSocketClient.ts'],

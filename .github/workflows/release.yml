@@ -1,0 +1,119 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build project
+        run: npm run build
+
+      - name: Get version and zip filename
+        id: package_info
+        run: |
+          # 从 package.json 读取基础版本号（build.js 已同步）
+          BASE_VERSION=$(node -p "require('./package.json').version || '1.0.0'")
+          
+          # 获取 commit SHA 的前 7 位
+          COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          
+          # 获取日期（格式：YYYYMMDD，UTC 时间）
+          DATE=$(date -u +"%Y%m%d")
+          
+          # 组合版本号：v1.1-abc1234
+          VERSION="v${BASE_VERSION}-${COMMIT_SHA}"
+          
+          # 组合 zip 文件名：WSocketClient-protobufjs-v版本号-commitid-日期.zip
+          ZIP_NAME="WSocketClient-protobufjs-v${BASE_VERSION}-${COMMIT_SHA}-${DATE}.zip"
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
+          echo "Release Version: $VERSION"
+          echo "Zip Filename: $ZIP_NAME"
+
+      - name: Create release package
+        run: |
+          # 创建临时目录
+          mkdir -p release-package
+          
+          # 复制需要打包的文件和目录
+          cp -r assets release-package/
+          cp -r proto-tools release-package/
+          cp -r settings release-package/
+          cp package.json release-package/
+          cp README.md release-package/
+          cp tsconfig.json release-package/
+          
+          # 如果存在 cacert.pem，也复制它
+          if [ -f cacert.pem ]; then
+            cp cacert.pem release-package/
+          fi
+          
+          # 创建 zip 文件（使用动态文件名）
+          cd release-package
+          zip -r ../${{ steps.package_info.outputs.zip_name }} .
+          cd ..
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << EOF
+          ## WSocketClient-protobufjs Release
+          
+          ### 包含内容
+          - \`assets/\` - 构建输出文件
+          - \`proto-tools/\` - Protobuf 转换工具
+          - \`settings/\` - 项目配置
+          - \`package.json\` - 项目依赖配置
+          - \`README.md\` - 使用文档
+          - \`tsconfig.json\` - TypeScript 配置
+          - \`cacert.pem\` - SSL/TLS 证书（如果存在）
+          
+          ### 使用说明
+          请参考 README.md 文件了解详细的使用方法。
+          
+          ### 安装
+          1. 解压 zip 文件
+          2. 运行 \`npm install\` 安装依赖
+          3. 运行 \`npm run build\` 构建项目
+          4. 按照 README.md 中的说明配置和使用
+          EOF
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          cat release_notes.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.package_info.outputs.version }}
+          name: Release ${{ steps.package_info.outputs.version }}
+          body_path: release_notes.md
+          files: ${{ steps.package_info.outputs.zip_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf release-package
+          rm -f ${{ steps.package_info.outputs.zip_name }} release_notes.md
+
