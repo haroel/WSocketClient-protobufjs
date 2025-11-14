@@ -134,7 +134,7 @@ declare const WSMessage: {
     BUILDER_BUILD_FAILED: 200007;
 };
 declare class WSocketClient {
-    static readonly VERSION = "1.0";
+    static readonly VERSION = "1.1";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
