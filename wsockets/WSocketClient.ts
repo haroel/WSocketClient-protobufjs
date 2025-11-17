@@ -533,7 +533,6 @@ export class WSocketClient {
                 for (let item of arr_) {
                     item.callback(responseMsgName, response);
                 }
-                arr_.length = 0;
             }
         }
     }
