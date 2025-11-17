@@ -117,7 +117,7 @@ export class WSocketProtoBuf {
             const Tmp = this.Builder.build(this.protoPackage);
             let ExternalMessage = Tmp["ExternalMessage"];
             if (!ExternalMessage) {
-                traceError(` - Error: ${WSMessage.EXTERNAL_MESSAGE_NOT_FOUND} protoPackage: ${this.protoPackage}`);
+                traceError(` - Error: ${WSMessage.MESSAGE_NOT_FOUND} protoPackage: ${this.protoPackage}`);
             }
 
             const cmdCode = (msgName === "PingReq" || msgName === "PingResp") ? 0 : 1;

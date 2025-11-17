@@ -24,7 +24,7 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
  * 使用 protobuf 进行消息序列化和反序列化
  */
 export class WSocketClient {
-    public static readonly VERSION = '1.1';
+    public static readonly VERSION = '1.2';
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -69,7 +69,7 @@ export class WSocketClient {
          * 每次重连之间的等待时间
          * @default 5000
          */
-        connectInterval: 5000,
+        connectInterval: 3000,
         /**
          * 连接超时时间（毫秒）
          * 从开始连接到连接成功或失败的最大等待时间
@@ -189,7 +189,7 @@ export class WSocketClient {
      * Protobuf 辅助对象
      * 用于处理 protobuf 消息的编码和解码
      */
-    public protobufHelper: WSocketProtoBuf = null;
+    public protobufUtil: WSocketProtoBuf = null;
     /**
      * 获取 WebSocket 实例
      * @returns 当前使用的 WebSocket 实例，如果未连接则返回 null
@@ -220,8 +220,8 @@ export class WSocketClient {
     }
 
     private _wsocket: WSocket = null;
-    private _callbacks: Map<number, any> = new Map();
-    private _ntfCallbacks: Map<string, Array<any>> = new Map();
+    private _listeners: Map<number, any> = new Map();
+    private _on_listeners: Map<string, Array<any>> = new Map();
 
     private _connectCallback: (success: boolean, client: WSocketClient) => void = null;
 
@@ -257,6 +257,7 @@ export class WSocketClient {
             }
             case WSocketClient.CONNECTING: {
                 this._connectTime = Date.now();
+                this._startTicker();
                 break;
             }
             case WSocketClient.CONNECTTED: {
@@ -267,7 +268,6 @@ export class WSocketClient {
                 callback && callback(true, this);
                 this._lastHeartbeatTime = Date.now();
                 this._lastHeartbeatResponseTime = this._lastHeartbeatTime;
-                this._startTicker();
                 // 连接后立即发送心跳包获取服务器时间
                 this._sendHeartbeat();
                 break;
@@ -311,8 +311,8 @@ export class WSocketClient {
      */
     public reset() {
         this.close();
-        this._callbacks.clear();
-        this._ntfCallbacks.clear();
+         this._listeners.clear();
+         this._on_listeners.clear();
         this._stopTicker();
         this._connectCallback = null;
         this._wsocket = null;
@@ -320,7 +320,7 @@ export class WSocketClient {
         this._lastHeartbeatTime = 0;
         this._connectTime = 0;
         this._isProtoLoaded = false;
-        this.protobufHelper = null;
+        this.protobufUtil = null;
 
     }
 
@@ -332,13 +332,13 @@ export class WSocketClient {
      * @param proto_config.proto_define protobuf 定义对象，包含消息和枚举定义
      * @param proto_config.proto_configs 协议配置映射表，Map 类型，key 为 cmdMerge，value 为 [cmdMerge, request, response] 数组
      */
-    public setConfig(proto_config: {
+    public setProtoConfig(proto_config: {
         protoName: string,
         proto_define: any,
         proto_configs: any
     }) {
-        this.protobufHelper = new WSocketProtoBuf(WSocketClient.protobuf);
-        this.protobufHelper.setConfig(proto_config.protoName, {
+        this.protobufUtil = new WSocketProtoBuf(WSocketClient.protobuf);
+        this.protobufUtil.setConfig(proto_config.protoName, {
             proto_define: proto_config.proto_define,
             proto_configs: proto_config.proto_configs
         });
@@ -355,7 +355,7 @@ export class WSocketClient {
      */
     public connect(serverURL: string, callback: (success: boolean, client: WSocketClient) => void) {
         if (!this._isProtoLoaded) {
-            trace(`Error: ${WSMessage.CALL_SET_CONFIG_FIRST}`);
+            trace(`Error: ${WSMessage.CALL_ERROR}`);
             return callback && callback(false, this);
         }
         if (this._state == WSocketClient.CONNECTTED) {
@@ -364,7 +364,6 @@ export class WSocketClient {
             trace(`Error: ${WSMessage.CONNECTING_REPEAT_ERROR}`);
             return callback && callback(false, this);
         }
-        this._stopTicker();
         this._connectCallback = callback;
         this.setState(WSocketClient.CONNECTING);
         if (!this._wsocket) {
@@ -391,7 +390,7 @@ export class WSocketClient {
             this._wsocket.close();
         }
         this._connectCallback = null;
-        this._callbacks.clear();
+         this._listeners.clear();
         this._stopTicker();
         this.setState(WSocketClient.DISCONNECTED);
     }
@@ -410,7 +409,7 @@ export class WSocketClient {
             case WSocketClient.CONNECTTED: {
                 const seqID = this._seqid++;
                 // 发送消息
-                let requestBuffer = this.protobufHelper.encodeExternalMessage(msgName, seqID, playload);
+                let requestBuffer = this.protobufUtil.encodeExternalMessage(msgName, seqID, playload);
                 if (requestBuffer) {
                     trace("send : ", msgName, seqID);
                     this._wsocket.send(requestBuffer);
@@ -424,7 +423,7 @@ export class WSocketClient {
                         sendTimeout:false,
                         callback: callback
                     };
-                    this._callbacks.set(seqID, request);
+                     this._listeners.set(seqID, request);
                     return request;
                 }
             }
@@ -450,9 +449,9 @@ export class WSocketClient {
      * @param priority 优先级，默认 0，数值越大优先级越高，相同优先级的按注册顺序执行
      */
     public onNTF(msgName: string, callback: (msgName: string, response: any) => void, priority = 0) {
-        let arr = this._ntfCallbacks.get(msgName);
+        let arr =  this._on_listeners.get(msgName);
         if (!arr) {
-            this._ntfCallbacks.set(msgName, [{
+             this._on_listeners.set(msgName, [{
                 priority: priority,
                 callback: callback
             }]);
@@ -472,26 +471,26 @@ export class WSocketClient {
      * @param callback 可选，要移除的特定回调函数。如果不传此参数，则删除该消息名称下的所有回调函数
      */
     public offNTF(msgName: string, callback?: (msgName: string, playload: any) => void) {
-        let arr = this._ntfCallbacks.get(msgName);
+        let arr =  this._on_listeners.get(msgName);
         if (arr) {
             if (callback && typeof callback === "function") {
                 for (let i = 0; i < arr.length; i++) {
                     if (arr[i].callback === callback) {
                         arr.splice(i, 1);
                         if (arr.length === 0) {
-                            this._ntfCallbacks.delete(msgName);
+                             this._on_listeners.delete(msgName);
                         }
                     }
                 }
             } else {
                 arr.length = 0;
-                this._ntfCallbacks.delete(msgName);
+                 this._on_listeners.delete(msgName);
             }
         }
     }
 
     private _data(data: any) {
-        let external_ = this.protobufHelper.decodeExternalMessage(data);
+        let external_ = this.protobufUtil.decodeExternalMessage(data);
         if (external_) {
             this.config.onMessage && this.config.onMessage(external_);
             let item = null;
@@ -500,7 +499,7 @@ export class WSocketClient {
                 item = __ping_msg;
             } else {
                 const cmdMerge = external_.cmdMerge;
-                item = this.protobufHelper.getProtoConfig(cmdMerge);
+                item = this.protobufUtil.getProtoConfig(cmdMerge);
                 if (!item) {
                     trace(` -Error: ${WSMessage.CSV_ERROR}, cmdMerge: ${cmdMerge}`);
                 }
@@ -512,23 +511,23 @@ export class WSocketClient {
             if (!responseMsgName) {
                 trace(` - Error: ${WSMessage.CSV_NO_RESPONSE}, seqId: ${seqId}`);
             }
-            let hasCallback = this._callbacks.has(seqId) || this._ntfCallbacks.has(responseMsgName);
+            let hasCallback =  this._listeners.has(seqId) ||  this._on_listeners.has(responseMsgName);
             if (!hasCallback) {
                 // 【提升性能考虑】没有任何地方监听和处理，则认为不需要解码data
                 return;
             }
             const response = {
                 code: external_.responseStatus,
-                data: this.protobufHelper.decodeData(responseMsgName, external_.data),
+                data: this.protobufUtil.decodeData(responseMsgName, external_.data),
                 msgName: responseMsgName
             }
-            let request = this._callbacks.get(seqId);
+            let request =  this._listeners.get(seqId);
             if (request) {
-                this._callbacks.delete(seqId);
+                 this._listeners.delete(seqId);
                 request.callback(requestMsgName, response);
                 request.callback = null;
             }
-            let arr = this._ntfCallbacks.get(responseMsgName);
+            let arr =  this._on_listeners.get(responseMsgName);
             if (arr) {
                 let arr_ = arr.slice();
                 for (let item of arr_) {
@@ -587,7 +586,7 @@ export class WSocketClient {
         const protocolTimeout = this.config.protocolTimeout;
         if (protocolTimeout > 0) {
             let nt = Date.now();
-            for (let item of this._callbacks.values()) {
+            for (let item of  this._listeners.values()) {
                 if (!item.sendTimeout && (nt - item.time) > protocolTimeout) {
                     item.sendTimeout = true;
                     trace(` - Error: ${WSMessage.PROTOCOL_TIMEOUT} : ${item.msgName} seqId: ${item.seqId}`);
@@ -601,7 +600,7 @@ export class WSocketClient {
                     // 连接超时
                     trace(` - Error: ${WSMessage.CONNECT_TIMEOUT} connectTimeout: ${this.config.connectTimeout}`);
                     this.close();
-                    this.config.onConnectTimeout && this.config.onConnectTimeout();
+                    this.config.onConnectTimeout && this.config.onConnectTimeout(this);
                     this.config.onClose && this.config.onClose();
                 }
                 break;
@@ -612,7 +611,7 @@ export class WSocketClient {
                     // 心跳响应超时
                     trace(` - Error: ${WSMessage.HEARTBEAT_TIMEOUT} heartbeatTimeout: ${this.config.heartbeatTimeout}`);
                     this.close();
-                    this.config.onHeartbeatTimeout && this.config.onHeartbeatTimeout();
+                    this.config.onHeartbeatTimeout && this.config.onHeartbeatTimeout(this);
                     this.config.onClose && this.config.onClose();
                 } else if ((nt - this._lastHeartbeatTime) > this.config.heartbeatInterval) {
                     // 心跳间隔，发送一个心跳
@@ -636,7 +635,7 @@ export class WSocketClient {
      */
     private _sendHeartbeat() {
         this._lastHeartbeatTime = Date.now();
-        this.send("PingReq", { clientTime: Date.now() }, (msgName: string, response: any) => {
+        this.send(__ping_msg[1], { clientTime: Date.now() }, (msgName: string, response: any) => {
             if (response.code === 0) {
                 this._lastHeartbeatResponseTime = Date.now();
                 trace(" serverTime : ", response.serverTime);
@@ -644,7 +643,7 @@ export class WSocketClient {
             } else {
                 trace(` - Error: ${WSMessage.HEARTBEAT_FAILED} heartbeatFailed: ${response}`);
             }
-            this.config.onHeartbeat && this.config.onHeartbeat();
+            this.config.onHeartbeat && this.config.onHeartbeat(this);
         });
     }
 }

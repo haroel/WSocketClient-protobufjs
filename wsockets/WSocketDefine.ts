@@ -27,7 +27,7 @@ export const WSMessage = {
      * 触发场景: 在调用 connect() 方法之前未调用 setConfig() 设置协议配置
      * 解决方法: 确保在连接前先调用 client.setConfig(proto_config)
      */
-    CALL_SET_CONFIG_FIRST: 100000,
+    CALL_ERROR: 100000,
 
     /**
      * 当前正在连接 WebSocket，请勿重复连接
@@ -116,7 +116,7 @@ export const WSMessage = {
      * 触发场景: 编码消息时，在 protobuf 定义中找不到 ExternalMessage 类型
      * 解决方法: 检查 .proto 文件，确保定义了 ExternalMessage 消息类型
      */
-    EXTERNAL_MESSAGE_NOT_FOUND: 200004,
+    MESSAGE_NOT_FOUND: 200004,
 
     /**
      * 编码消息失败

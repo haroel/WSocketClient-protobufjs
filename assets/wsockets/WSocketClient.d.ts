@@ -24,7 +24,7 @@ declare const WSMessage: {
      * 触发场景: 在调用 connect() 方法之前未调用 setConfig() 设置协议配置
      * 解决方法: 确保在连接前先调用 client.setConfig(proto_config)
      */
-    CALL_SET_CONFIG_FIRST: 100000;
+    CALL_ERROR: 100000;
 
     /**
      * 当前正在连接 WebSocket，请勿重复连接
@@ -113,7 +113,7 @@ declare const WSMessage: {
      * 触发场景: 编码消息时，在 protobuf 定义中找不到 ExternalMessage 类型
      * 解决方法: 检查 .proto 文件，确保定义了 ExternalMessage 消息类型
      */
-    EXTERNAL_MESSAGE_NOT_FOUND: 200004;
+    MESSAGE_NOT_FOUND: 200004;
 
     /**
      * 编码消息失败
@@ -140,7 +140,7 @@ declare const WSMessage: {
     BUILDER_BUILD_FAILED: 200007;
 };
 declare class WSocketClient {
-    static readonly VERSION = "1.1";
+    static readonly VERSION = "1.2";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -297,7 +297,7 @@ declare class WSocketClient {
      * Protobuf 辅助对象
      * 用于处理 protobuf 消息的编码和解码
      */
-    protobufHelper: any;
+    protobufUtil: any;
     /**
      * 获取 WebSocket 实例
      * @returns 当前使用的 WebSocket 实例，如果未连接则返回 null
@@ -355,7 +355,7 @@ declare class WSocketClient {
      * @param proto_config.proto_define protobuf 定义对象，包含消息和枚举定义
      * @param proto_config.proto_configs 协议配置映射表，Map 类型，key 为 cmdMerge，value 为 [cmdMerge, request, response] 数组
      */
-    setConfig(proto_config: {
+    setProtoConfig(proto_config: {
         protoName: string;
         proto_define: any;
         proto_configs: any;
