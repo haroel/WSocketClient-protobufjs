@@ -104,10 +104,10 @@ export class WSocket {
     private _reconnect() {
         if (this.opts.retry > 0) {
             trace("reconnect ", this.opts.retry, this.opts.interval);
+            this.opts.retry--;
             this._reconnectTimer = setTimeout(() => {
                 clearTimeout(this._reconnectTimer);
                 this._reconnectTimer = null;
-                this.opts.retry--;
                 this.connect(this.url);
             }, this.opts.interval);
         }

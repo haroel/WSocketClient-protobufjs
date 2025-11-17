@@ -547,7 +547,7 @@ export class WSocketClient {
             case "onclose":
                 let lastState = this._state;
                 this.close();
-                this.config.onClose && this.config.onClose();
+                // autoReconnect模式，满足条件则自动重连
                 if (lastState === WSocketClient.CONNECTTED && this.config.autoReconnect && !this._isInReconnect) {
                     // 从连接变成close状态，则开启断线重连
                     this._isInReconnect = true;
@@ -557,6 +557,9 @@ export class WSocketClient {
                         this._isInReconnect = false;
                         this.config.onAutoReconnectEnd && this.config.onAutoReconnectEnd(success);
                     });
+                }else{
+                    // 非autoReconnect模式，则直接触发onClose回调
+                    this.config.onClose && this.config.onClose();
                 }
                 break;
             case "onerror":
