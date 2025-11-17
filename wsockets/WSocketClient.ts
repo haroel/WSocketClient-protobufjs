@@ -411,7 +411,7 @@ export class WSocketClient {
                 // 发送消息
                 let requestBuffer = this.protobufUtil.encodeExternalMessage(msgName, seqID, playload);
                 if (requestBuffer) {
-                    trace("send : ", msgName, seqID);
+                    // trace("send : ", msgName, seqID);
                     this._wsocket.send(requestBuffer);
                     let request = {
                         seqId: seqID,
@@ -507,7 +507,7 @@ export class WSocketClient {
             const requestMsgName = item[1];
             const responseMsgName = item[2];
             const seqId = external_.seqId;
-            trace("receive : ", responseMsgName, seqId);
+            // trace("receive : ", responseMsgName, seqId);
             if (!responseMsgName) {
                 trace(` - Error: ${WSMessage.CSV_NO_RESPONSE}, seqId: ${seqId}`);
             }
@@ -637,8 +637,12 @@ export class WSocketClient {
         this.send(__ping_msg[1], { clientTime: Date.now() }, (msgName: string, response: any) => {
             if (response.code === 0) {
                 this._lastHeartbeatResponseTime = Date.now();
-                trace(" serverTime : ", response.serverTime);
-                this._ping = response.serverTime - Date.now();
+                if(response.serverTime){
+                    // trace(" serverTime : ", response.serverTime);
+                    this._ping = response.serverTime - Date.now();
+                }else{
+                    trace(` - Error:  heartbeat serverTime is null: ${response}`);
+                }
             } else {
                 trace(` - Error: ${WSMessage.HEARTBEAT_FAILED} heartbeatFailed: ${response}`);
             }

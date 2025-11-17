@@ -73,7 +73,16 @@ export class Main extends cc.Component {
     private addLog(log: string) {
         const logItem = cc.instantiate(this.lineLog);
         logItem.active = true;
-        logItem.getComponent(cc.Label).string = log;
-        this.scrollView.getComponent(cc.ScrollView).content.addChild(logItem);
+        // 获取当前时间（时分秒）
+        const now = new Date();
+        const hours = now.getHours().toString().padStart(2, '0');
+        const minutes = now.getMinutes().toString().padStart(2, '0');
+        const seconds = now.getSeconds().toString().padStart(2, '0');
+        const time = `${hours}:${minutes}:${seconds}`;
+        logItem.getComponent(cc.Label).string = `[${time}] ${log}`;
+        let scrollView = this.scrollView.getComponent(cc.ScrollView);
+        logItem.setPosition(-scrollView.getComponent(cc.UITransform).contentSize.width/2 + 10, 0);
+        scrollView.content.addChild(logItem);
+        scrollView.scrollToBottom(0.2);
     }
 }
