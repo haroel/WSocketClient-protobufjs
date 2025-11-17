@@ -103,7 +103,6 @@ export class WSocket {
 
     private _reconnect() {
         if (this.opts.retry > 0) {
-            trace("reconnect ", this.opts.retry, this.opts.interval);
             this.opts.retry--;
             this._reconnectTimer = setTimeout(() => {
                 clearTimeout(this._reconnectTimer);
@@ -113,13 +112,8 @@ export class WSocket {
         }
     }
     public send(arrayBuffer: ArrayBuffer) {
-        if (arrayBuffer.byteLength < 1) {
-            traceError('Buffer.size  == 0')
-        }
         if (this.ws) {
             this.ws.send(arrayBuffer);
-        } else {
-            traceError("ws null!")
         }
     }
 

@@ -1,15 +1,12 @@
 {
   "name": "WSocketClient-protobufjs",
-  "version": "1.2",
+  "version": "1.3",
   "uuid": "e12b3928-52bd-4229-891c-d0bf611fe452",
   "creator": {
     "version": "3.8.7"
   },
   "scripts": {
-    "build": "node wsockets/build.js",
-    "build:dev": "node wsockets/build.js --no-minify",
-    "build:prod": "node wsockets/build.js",
-    "build:both": "node wsockets/build.js --both"
+    "build": "node wsockets/build.js"
   },
   "devDependencies": {
     "esbuild": "^0.20.0",

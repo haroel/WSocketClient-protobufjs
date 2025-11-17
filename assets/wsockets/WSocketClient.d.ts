@@ -132,7 +132,7 @@ declare const WSMessage: {
     DECODE_FAILED: 200006
 };
 declare class WSocketClient {
-    static readonly VERSION = "1.2";
+    static readonly VERSION = "1.3";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -159,6 +159,12 @@ declare class WSocketClient {
      * 客户端配置对象
      */
     config: {
+        /**
+         * 调试模式
+         * 是否开启调试模式，开启后会输出调试日志
+         * @default false
+         */
+        debugMode: boolean;
         /**
          * WebSocket 类构造函数，默认使用浏览器自带的 WebSocket
          * 可以替换为自定义的 WebSocket 实现（如 Node.js 的 ws 库）
@@ -383,7 +389,7 @@ declare class WSocketClient {
         /**
          * 是否已发送心跳超时
          */
-        sendTimeout: boolean;
+        timeout: boolean;
         callback: (msgName: string, response: any) => void;
     };
     /**

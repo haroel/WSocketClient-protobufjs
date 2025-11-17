@@ -24,7 +24,7 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
  * 使用 protobuf 进行消息序列化和反序列化
  */
 export class WSocketClient {
-    public static readonly VERSION = '1.2';
+    public static readonly VERSION = '1.3';
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -53,6 +53,12 @@ export class WSocketClient {
      * 客户端配置对象
      */
     public config = {
+        /**
+         * 调试模式
+         * 是否开启调试模式，开启后会输出调试日志
+         * @default false
+         */
+        debugMode : false,
         /**
          * WebSocket 类构造函数，默认使用浏览器自带的 WebSocket
          * 可以替换为自定义的 WebSocket 实现（如 Node.js 的 ws 库）
@@ -224,7 +230,11 @@ export class WSocketClient {
     private _on_listeners: Map<string, Array<any>> = new Map();
 
     private _connectCallback: (success: boolean, client: WSocketClient) => void = null;
-
+    private _invokeConnect(result: boolean){
+        let callback = this._connectCallback;
+        this._connectCallback = null;
+        callback && callback(result, this);
+    }
 
     private _ticker = null;
 
@@ -245,14 +255,15 @@ export class WSocketClient {
         if (this._state === val) {
             return;
         };
-        trace(`laststate: ${this._state}, new state: ${val}`);
+        let info = {
+            from:this._state,
+            to:val
+        }
         this._state = val;
         switch (val) {
             case WSocketClient.DISCONNECTED: {
                 this._stopTicker();
-                let callback = this._connectCallback;
-                this._connectCallback = null;
-                callback && callback(false, this);
+                this._invokeConnect(false);
                 break;
             }
             case WSocketClient.CONNECTING: {
@@ -263,17 +274,15 @@ export class WSocketClient {
             case WSocketClient.CONNECTTED: {
                 this._seqid = 1;
                 this._isInReconnect = false;
-                let callback = this._connectCallback;
-                this._connectCallback = null;
-                callback && callback(true, this);
-                this._lastHeartbeatTime = Date.now();
-                this._lastHeartbeatResponseTime = this._lastHeartbeatTime;
+                this._invokeConnect(true);
+                this._lastHeartbeatResponseTime = Date.now();
                 // 连接后立即发送心跳包获取服务器时间
                 this._sendHeartbeat();
                 break;
             }
         }
-        this.config.onStateChange && this.config.onStateChange(val);
+        this.config.debugMode && trace(`State Change: ${JSON.stringify(info)}`);
+        this.config.onStateChange && this.config.onStateChange(info);
     }
 
 
@@ -321,7 +330,6 @@ export class WSocketClient {
         this._connectTime = 0;
         this._isProtoLoaded = false;
         this.protobufUtil = null;
-
     }
 
     /**
@@ -338,10 +346,7 @@ export class WSocketClient {
         proto_configs: any
     }) {
         this.protobufUtil = new WSocketProtoBuf(WSocketClient.protobuf);
-        this.protobufUtil.setConfig(proto_config.protoName, {
-            proto_define: proto_config.proto_define,
-            proto_configs: proto_config.proto_configs
-        });
+        this.protobufUtil.setConfig(proto_config.protoName, proto_config);
         this._isProtoLoaded = true;
     }
 
@@ -364,6 +369,7 @@ export class WSocketClient {
             trace(`Error: ${WSMessage.CONNECTING_REPEAT_ERROR}`);
             return callback && callback(false, this);
         }
+        this.config.debugMode && trace(`Connect: ${serverURL}`);
         this._connectCallback = callback;
         this.setState(WSocketClient.CONNECTING);
         if (!this._wsocket) {
@@ -409,9 +415,9 @@ export class WSocketClient {
             case WSocketClient.CONNECTTED: {
                 const seqID = this._seqid++;
                 // 发送消息
-                let requestBuffer = this.protobufUtil.encodeExternalMessage(msgName, seqID, playload);
+                let requestBuffer = this.protobufUtil.encodeRequest(msgName, seqID, playload);
                 if (requestBuffer) {
-                    // trace("send : ", msgName, seqID);
+                    this.config.debugMode && trace("send : ", msgName, seqID);
                     this._wsocket.send(requestBuffer);
                     let request = {
                         seqId: seqID,
@@ -420,7 +426,7 @@ export class WSocketClient {
                         /**
                          * 是否已发送心跳超时
                          */
-                        sendTimeout:false,
+                        timeout:false,
                         callback: callback
                     };
                      this._listeners.set(seqID, request);
@@ -490,7 +496,7 @@ export class WSocketClient {
     }
 
     private _data(data: any) {
-        let external_ = this.protobufUtil.decodeExternalMessage(data);
+        let external_ = this.protobufUtil.decodeResponse(data);
         if (external_) {
             this.config.onMessage && this.config.onMessage(external_);
             let item = null;
@@ -507,7 +513,7 @@ export class WSocketClient {
             const requestMsgName = item[1];
             const responseMsgName = item[2];
             const seqId = external_.seqId;
-            // trace("receive : ", responseMsgName, seqId);
+            this.config.debugMode && trace("receive : ", responseMsgName, seqId);
             if (!responseMsgName) {
                 trace(` - Error: ${WSMessage.CSV_NO_RESPONSE}, seqId: ${seqId}`);
             }
@@ -586,8 +592,8 @@ export class WSocketClient {
         if (protocolTimeout > 0) {
             let nt = Date.now();
             for (let item of  this._listeners.values()) {
-                if (!item.sendTimeout && (nt - item.time) > protocolTimeout) {
-                    item.sendTimeout = true;
+                if (!item.timeout && (nt - item.time) > protocolTimeout) {
+                    item.timeout = true;
                     trace(` - Error: ${WSMessage.PROTOCOL_TIMEOUT} : ${item.msgName} seqId: ${item.seqId}`);
                     this.config.onProtocolTimeout && this.config.onProtocolTimeout(item);
                 }
@@ -641,7 +647,7 @@ export class WSocketClient {
                     // trace(" serverTime : ", response.serverTime);
                     this._ping = response.serverTime - Date.now();
                 }else{
-                    trace(` - Error:  heartbeat serverTime is null: ${response}`);
+                    this.config.debugMode && trace(` Heartbeat ${JSON.stringify(response)}`);
                 }
             } else {
                 trace(` - Error: ${WSMessage.HEARTBEAT_FAILED} heartbeatFailed: ${response}`);

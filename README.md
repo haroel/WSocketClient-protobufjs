@@ -93,6 +93,13 @@ const client = WSocketClient.getInstance();
 // 自定义配置
 client.config = {
     /**
+     * 调试模式
+     * 是否开启调试模式，开启后会输出详细的调试日志
+     * @default false
+     */
+    debugMode: false,
+    
+    /**
      * WebSocket 类构造函数，默认使用浏览器自带的 WebSocket
      * 可以替换为自定义的 WebSocket 实现（如 Node.js 的 ws 库）
      */

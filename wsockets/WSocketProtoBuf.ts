@@ -28,6 +28,10 @@ function longToNumber(obj: any, protobufLong: any) {
     }
 }
 
+function isPing(msgName: string) {
+    return msgName === "PingReq" || msgName === "PingResp";
+}
+
 export class WSocketProtoBuf {
 
     public protobuf: { ByteBuffer: any, Long: any, Util: any, Builder: any, loadJson: any, loadProto: any } = null;
@@ -72,7 +76,7 @@ export class WSocketProtoBuf {
     public getProtoConfig(cmdMerge: number) {
         return this.proto_configs.get(cmdMerge);
     }
-    public getMessageCMDMerge(requestMsgName: string) {
+    public getCMDMerge(requestMsgName: string) {
         for (let [k, v] of this.proto_configs.entries()) {
             if (v[1] === requestMsgName) {
                 return k;
@@ -110,7 +114,7 @@ export class WSocketProtoBuf {
     * @param playload 
     * @returns 
     */
-    public encodeExternalMessage(msgName: string, seqID: number, playload: object) {
+    public encodeRequest(msgName: string, seqID: number, playload: object) {
         try {
             // 检查 Builder.build 返回值
             const Tmp = this.Builder.build(this.protoPackage);
@@ -119,11 +123,11 @@ export class WSocketProtoBuf {
                 traceError(` - Error: ${WSMessage.MESSAGE_NOT_FOUND} protoPackage: ${this.protoPackage}`);
             }
 
-            const cmdCode = (msgName === "PingReq" || msgName === "PingResp") ? 0 : 1;
-            const cmdMerge = this.getMessageCMDMerge(msgName);
+            const cmdCode = isPing(msgName) ? 0 : 1;
+            const cmdMerge = this.getCMDMerge(msgName);
 
             // 检查 cmdMerge 是否有效
-            if (cmdMerge === 0 && msgName !== "PingReq" && msgName !== "PingResp") {
+            if (cmdMerge === 0 && !isPing(msgName)) {
                 traceError(` - Error: ${WSMessage.CMDMERGE_NOT_FOUND} msgName: ${msgName}`);
             }
             // 检查 encodeObjectToMessage 返回值
@@ -157,7 +161,7 @@ export class WSocketProtoBuf {
         }
     }
 
-    public decodeExternalMessage(buffer: ArrayBuffer, aes: boolean = true) {
+    public decodeResponse(buffer: ArrayBuffer, aes: boolean = true) {
         try {
             if (aes && buffer.byteLength > 0 && this.encryptUtils) {
                 buffer = this.encryptUtils.AESDecData(buffer);
