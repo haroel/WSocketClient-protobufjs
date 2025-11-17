@@ -6,7 +6,10 @@
     "version": "3.8.7"
   },
   "scripts": {
-    "build": "node wsockets/build.js"
+    "build": "node wsockets/build.js",
+    "build:dev": "node wsockets/build.js --no-minify",
+    "build:prod": "node wsockets/build.js",
+    "build:both": "node wsockets/build.js --both"
   },
   "devDependencies": {
     "esbuild": "^0.20.0",

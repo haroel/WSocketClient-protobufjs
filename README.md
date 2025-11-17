@@ -56,7 +56,7 @@ const client = WSocketClient.getInstance();
 
 // 2. 设置协议配置（必须在使用前调用）
 import { proto_config } from './wsockets/proto';
-client.setConfig(proto_config);
+client.setProtoConfig(proto_config);
 
 // 3. 连接服务器
 client.connect("ws://localhost:8080/websocket", (success, client) => {
@@ -257,11 +257,12 @@ client.config = {
 
 #### 静态属性
 
+- `WSocketClient.VERSION` - 版本号，当前版本为 "1.2"
 - `WSocketClient.NONE` (0) - 初始状态
 - `WSocketClient.DISCONNECTED` (1) - 断连状态
 - `WSocketClient.CONNECTING` (2) - 正在连接状态
 - `WSocketClient.CONNECTTED` (3) - 连接成功状态
-- `WSocketClient.protobuf` - protobufjs 对象
+- `WSocketClient.protobuf` - protobufjs 原始对象，用于 protobuf 消息的序列化和反序列化
 
 #### 静态方法
 
@@ -273,24 +274,43 @@ client.config = {
 
 #### 实例方法
 
-- `setConfig(proto_config)` - 设置协议配置
-- `connect(serverURL, callback)` - 连接服务器
-- `close(code?)` - 关闭连接
-- `send(msgName, payload, callback)` - 发送消息
-- `onNTF(msgName, callback, priority?)` - 监听推送消息
-- `offNTF(msgName, callback?)` - 取消监听
-- `reset()` - 重置所有状态
-- `setState(val)` - 设置连接状态
+- `setProtoConfig(proto_config)` - 设置协议配置（必须在调用 connect 之前调用）
+  - `proto_config.protoName` - 协议名称，通常为 "proto.json"
+  - `proto_config.proto_define` - protobuf 定义对象，包含消息和枚举定义
+  - `proto_config.proto_configs` - 协议配置映射表，Map 类型，key 为 cmdMerge，value 为 [cmdMerge, request, response] 数组
+- `connect(serverURL, callback)` - 连接 WebSocket 服务器
+  - `serverURL` - WebSocket 服务器地址，格式如 "ws://localhost:8080" 或 "wss://example.com"
+  - `callback(success, client)` - 连接结果回调函数
+- `close(code?)` - 关闭 WebSocket 连接
+  - `code` - WebSocket 关闭代码，默认为 -1。标准关闭代码：1000=正常关闭，1001=端点离开，1006=异常关闭
+- `send(msgName, payload, callback)` - 发送消息到服务器（只有在连接成功时才能发送）
+  - `msgName` - 消息名称，必须在 proto_config 中已配置
+  - `payload` - 消息负载对象，需要符合对应消息类型的 protobuf 定义
+  - `callback(msgName, response)` - 响应回调函数，当收到服务器响应时调用
+  - 返回：如果发送成功，返回请求对象（包含 seqId、time、msgName、callback），否则返回 null
+- `onNTF(msgName, callback, priority?)` - 监听服务器推送消息（通知消息）
+  - `msgName` - 消息名称，服务器推送的消息类型
+  - `callback(msgName, response)` - 回调函数，当收到对应消息时调用
+  - `priority` - 优先级，默认 0，数值越大优先级越高，相同优先级的按注册顺序执行
+- `offNTF(msgName, callback?)` - 取消监听协议返回消息（包括推送和普通CS模式）
+  - `msgName` - 消息名称，要取消监听的消息类型
+  - `callback` - 可选，要移除的特定回调函数。如果不传此参数，则删除该消息名称下的所有回调函数
+- `reset()` - 重置所有状态和数据（关闭连接、清空所有回调、停止定时器、重置所有内部状态）
+- `setState(val)` - 设置连接状态（状态变化时会触发相应的回调函数和内部逻辑）
 
 #### Getter 属性
 
-- `wsocket` - 获取 WebSocket 实例
-- `url` - 获取当前连接的 URL
-- `isConnected` - 是否已连接
-- `isReconnecting` - 是否正在重连
-- `state` - 当前连接状态
-- `ping` - 服务器与客户端的时间差（毫秒）
-- `serverTime` - 服务器当前时间（毫秒时间戳）
+- `wsocket` - 获取 WebSocket 实例，如果未连接则返回 null
+- `url` - 获取当前连接的 WebSocket URL，如果未连接则返回空字符串
+- `isConnected` - 获取是否已连接，如果当前状态为 CONNECTTED 则返回 true，否则返回 false
+- `isReconnecting` - 获取是否正在重连，如果正在自动重连则返回 true，否则返回 false
+- `state` - 获取当前连接状态，返回状态值（NONE=0, DISCONNECTED=1, CONNECTING=2, CONNECTTED=3）
+- `ping` - 获取服务器与客户端的时间差（毫秒），通过心跳包计算得出，值为 serverTime - clientTime，正数表示服务器时间比客户端快
+- `serverTime` - 获取服务器当前时间（毫秒时间戳），基于客户端时间和时间差计算得出
+
+#### 其他属性
+
+- `protobufUtil` - Protobuf 辅助对象，用于处理 protobuf 消息的编码和解码
 
 ### 完整示例
 
@@ -309,8 +329,8 @@ client.config.onMessage = (msg) => {
     console.log("收到消息:", msg);
 };
 
-// 设置协议配置
-client.setConfig(proto_config);
+// 设置协议配置（必须在连接前调用）
+client.setProtoConfig(proto_config);
 
 // 连接服务器
 client.connect("ws://localhost:8080/websocket", (success, client) => {
@@ -444,20 +464,91 @@ export const proto_config = {
 
 
 
+## 错误码说明
+
+WSocketClient 定义了完整的错误码体系，可通过 `WSMessage` 对象访问：
+
+### 连接相关错误 (100000-199999)
+
+- `WSMessage.CALL_ERROR` (100000) - 请先调用 setProtoConfig 方法
+  - 触发场景：在调用 connect() 方法之前未调用 setProtoConfig() 设置协议配置
+  - 解决方法：确保在连接前先调用 `client.setProtoConfig(proto_config)`
+
+- `WSMessage.CONNECTING_REPEAT_ERROR` (100001) - 当前正在连接 WebSocket，请勿重复连接
+  - 触发场景：在连接状态为 CONNECTING 时，再次调用 connect() 方法
+  - 解决方法：等待当前连接完成后再尝试连接
+
+- `WSMessage.CONNECT_TIMEOUT` (100002) - 连接超时
+  - 触发场景：从开始连接到连接成功或失败的时间超过了 config.connectTimeout 设置的值
+  - 解决方法：检查网络连接，或增加 connectTimeout 的值
+
+- `WSMessage.PROTOCOL_TIMEOUT` (100003) - 协议超时
+  - 触发场景：发送请求后，在 config.protocolTimeout 时间内未收到服务器响应
+  - 解决方法：检查服务器是否正常响应，或增加 protocolTimeout 的值
+
+- `WSMessage.HEARTBEAT_TIMEOUT` (100004) - 心跳超时
+  - 触发场景：发送心跳包后，在 config.heartbeatTimeout 时间内未收到心跳响应
+  - 解决方法：检查网络连接，服务器可能会主动断开连接
+
+- `WSMessage.HEARTBEAT_FAILED` (100005) - 心跳响应失败
+  - 触发场景：收到心跳响应，但响应状态码不为 0（表示心跳失败）
+  - 解决方法：检查服务器心跳处理逻辑
+
+- `WSMessage.CONNECTING_NOW` (100006) - 当前正在连接，请等待连接完成
+  - 触发场景：在连接状态为 CONNECTING 时，再次调用 send 方法
+  - 解决方法：等待当前连接完成后再尝试发送消息
+
+### 协议处理相关错误 (200000-299999)
+
+- `WSMessage.PROTO_PARSE_ERROR` (200000) - Protobuf 解析错误
+  - 触发场景：在 setProtoConfig() 时，protobuf 定义文件解析失败，无法找到对应的 package
+  - 解决方法：检查 proto_define 配置是否正确，确保 package 名称匹配
+
+- `WSMessage.CSV_ERROR` (200001) - CSV 配置错误，cmdMerge 无法找到对应的配置
+  - 触发场景：收到服务器消息时，根据 cmdMerge 无法在 proto_configs 中找到对应的协议配置
+  - 解决方法：检查 ProtoConfig.csv 配置，确保 cmdMerge 值已正确配置
+
+- `WSMessage.CSV_NO_RESPONSE` (200002) - CSV 配置错误，响应消息名称为空
+  - 触发场景：收到服务器消息时，协议配置中缺少响应消息名称（response 字段为空）
+  - 解决方法：检查 ProtoConfig.csv 配置，确保每个 cmdMerge 都配置了对应的 response 消息名称
+
+- `WSMessage.CMDMERGE_NOT_FOUND` (200003) - 找不到 cmdMerge 配置
+  - 触发场景：发送消息时，根据消息名称（msgName）无法在 proto_configs 中找到对应的 cmdMerge
+  - 解决方法：检查 ProtoConfig.csv 配置，确保该消息名称已正确配置 cmdMerge
+
+- `WSMessage.MESSAGE_NOT_FOUND` (200004) - 找不到 ExternalMessage 定义
+  - 触发场景：编码消息时，在 protobuf 定义中找不到 ExternalMessage 类型
+  - 解决方法：检查 .proto 文件，确保定义了 ExternalMessage 消息类型
+
+- `WSMessage.ENCODE_FAILED` (200005) - 编码消息失败
+  - 触发场景：将消息对象编码为 Protobuf 二进制数据时失败
+  - 解决方法：检查消息对象格式是否正确，是否符合 protobuf 定义
+
+- `WSMessage.DECODE_FAILED` (200006) - 解码消息失败
+  - 触发场景：将 Protobuf 二进制数据解码为消息对象时失败
+  - 解决方法：检查接收到的数据格式是否正确，protobuf 定义是否匹配
+
 ## 注意事项
 
-1. **必须先调用 `setConfig`**：在调用 `connect` 之前，必须先调用 `setConfig` 设置协议配置
+1. **必须先调用 `setProtoConfig`**：在调用 `connect` 之前，必须先调用 `setProtoConfig` 设置协议配置
 2. **协议配置**：确保 `proto.ts` 文件中的协议配置与服务器端一致
 3. **消息名称**：发送消息时，`msgName` 必须在 `proto_config` 中已配置
 4. **自动重连**：默认开启自动重连，可通过 `config.autoReconnect` 关闭
 5. **心跳机制**：连接成功后会自动发送心跳包，用于同步服务器时间
 6. **SSL/TLS 证书（Android）**：如果使用 wss 连接且 CocosCreator 版本低于 3.5，需要在 `config.cacert` 中指定证书文件路径（如 `"assets/cacert.pem"`）。CocosCreator 3.5+ 版本不再需要此参数
+7. **错误处理**：建议在回调函数中检查 `response.code` 来判断请求是否成功，并参考错误码说明进行问题排查
 
 ## 许可证
 
 MIT License
 
 ## 更新日志
+
+### v1.2
+- 更新 API 方法名：`setConfig` 更名为 `setProtoConfig`，更清晰地表达方法用途
+- 完善错误码定义和文档说明
+- 优化类型声明文件，增加详细的 JSDoc 注释
+- 改进 API 文档，补充参数说明和返回值说明
 
 ### v1.1
 - 优化构建脚本

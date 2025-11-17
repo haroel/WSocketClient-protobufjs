@@ -5,10 +5,17 @@ const fs = require('fs');
 
 const outdir = path.resolve(__dirname, '../assets/wsockets');
 const outfile = path.join(outdir, 'WSocketClient.js');
+const outfileMin = path.join(outdir, 'WSocketClient.min.js');
 const dtsOutfile = path.join(outdir, 'WSocketClient.d.ts');
 const tempDtsDir = path.resolve(__dirname, 'temp_dts');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
 const wsocketClientPath = path.resolve(__dirname, 'WSocketClient.ts');
+
+// 解析命令行参数和环境变量
+const args = process.argv.slice(2);
+// 默认生产模式（压缩），除非明确指定 --no-minify
+const shouldMinify = !args.includes('--no-minify');
+const buildBoth = args.includes('--both') || process.env.BUILD_BOTH === 'true';
 
 // 确保输出目录存在
 fs.mkdirSync(outdir, { recursive: true });
@@ -35,16 +42,75 @@ try {
     process.exit(1);
 }
 
-build({
+// 构建配置
+const buildConfig = {
     entryPoints: ['wsockets/WSocketClient.ts'],
     bundle: true,
-    outfile: outfile,
     platform: 'browser',
     target: 'es2015',
-    minify: true,
-}).then(() => {
-    console.log(`✅ Bundle created at ${outfile}`);
-    console.log('⏳ Generating declaration files via tsc...');
+    format: 'iife',
+    sourcemap: false,
+};
+
+// 构建函数
+async function buildFiles() {
+    const builds = [];
+    
+    if (buildBoth) {
+        // 生成两个版本：开发版（未压缩）和生产版（压缩）
+        console.log('📦 Building both development and production versions...');
+        
+        // 开发版（未压缩）
+        builds.push(
+            build({
+                ...buildConfig,
+                outfile: outfile,
+                minify: false,
+            }).then(() => {
+                console.log(`✅ Development bundle created at ${outfile}`);
+            })
+        );
+        
+        // 生产版（压缩）
+        builds.push(
+            build({
+                ...buildConfig,
+                outfile: outfileMin,
+                minify: true,
+            }).then(() => {
+                const stats = fs.statSync(outfileMin);
+                const sizeKB = (stats.size / 1024).toFixed(2);
+                console.log(`✅ Production bundle (minified) created at ${outfileMin} (${sizeKB} KB)`);
+            })
+        );
+    } else {
+        // 只生成一个版本
+        // 为了向后兼容，默认输出到 WSocketClient.js（即使压缩）
+        // 如果明确指定 --no-minify，则输出未压缩版本
+        const outputFile = outfile;
+        const mode = shouldMinify ? 'production (minified)' : 'development';
+        
+        console.log(`📦 Building ${mode} version...`);
+        
+        builds.push(
+            build({
+                ...buildConfig,
+                outfile: outputFile,
+                minify: shouldMinify,
+            }).then(() => {
+                const stats = fs.statSync(outputFile);
+                const sizeKB = (stats.size / 1024).toFixed(2);
+                const minifyStatus = shouldMinify ? 'minified' : 'unminified';
+                console.log(`✅ Bundle created at ${outputFile} (${sizeKB} KB, ${minifyStatus})`);
+            })
+        );
+    }
+    
+    await Promise.all(builds);
+}
+
+buildFiles().then(() => {
+    console.log('\n⏳ Generating declaration files via tsc...');
     try {
         // 1. 清理临时目录
         if (fs.existsSync(tempDtsDir)) {

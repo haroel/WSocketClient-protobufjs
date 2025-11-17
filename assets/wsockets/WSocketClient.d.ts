@@ -121,7 +121,7 @@ declare const WSMessage: {
      * 触发场景: 将消息对象编码为 Protobuf 二进制数据时失败
      * 解决方法: 检查消息对象格式是否正确，是否符合 protobuf 定义
      */
-    ENCODE_MESSAGE_FAILED: 200005;
+    ENCODE_FAILED: 200005;
 
     /**
      * 解码消息失败
@@ -129,15 +129,7 @@ declare const WSMessage: {
      * 触发场景: 将 Protobuf 二进制数据解码为消息对象时失败
      * 解决方法: 检查接收到的数据格式是否正确，protobuf 定义是否匹配
      */
-    DECODE_MESSAGE_FAILED: 200006;
-
-    /**
-     * Builder.build 返回 null
-     * 错误码: 200007
-     * 触发场景: 调用 protobuf Builder.build() 方法时返回 null，无法获取 package 对象
-     * 解决方法: 检查 protobuf 定义是否正确加载，package 名称是否正确
-     */
-    BUILDER_BUILD_FAILED: 200007;
+    DECODE_FAILED: 200006
 };
 declare class WSocketClient {
     static readonly VERSION = "1.2";

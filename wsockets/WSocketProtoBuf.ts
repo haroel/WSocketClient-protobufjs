@@ -89,18 +89,17 @@ export class WSocketProtoBuf {
         try {
             const packageObj = this.Builder.build(this.protoPackage);
             if (!packageObj) {
-                traceError(` - Error: ${WSMessage.BUILDER_BUILD_FAILED} protoPackage: ${this.protoPackage}`);
-                return null;
+                throw new Error(`${this.protoPackage} builder build failed`);
             }
 
             let Message = packageObj[msgName];
             if (!Message) {
-                traceError(` - Error: ${WSMessage.DECODE_MESSAGE_FAILED} msgName: ${msgName}`);
+                traceError(` - Error: ${WSMessage.DECODE_FAILED} msgName: ${msgName}`);
                 return null;
             }
             return new Message(obj);
         } catch (error) {
-            traceError(` - Error: ${WSMessage.ENCODE_MESSAGE_FAILED} error: ${error.toString()}`);
+            traceError(` - Error: ${WSMessage.ENCODE_FAILED} error: ${error.toString()}`);
         }
         return null;
     }
@@ -130,7 +129,7 @@ export class WSocketProtoBuf {
             // 检查 encodeObjectToMessage 返回值
             const message = this.encodeObjectToMessage(msgName, playload);
             if (!message) {
-                traceError(` - Error: ${WSMessage.ENCODE_MESSAGE_FAILED} msgName: ${msgName}`);
+                traceError(` - Error: ${WSMessage.ENCODE_FAILED} msgName: ${msgName}`);
             }
             let obj = {
                 cmdCode: cmdCode,
@@ -153,7 +152,7 @@ export class WSocketProtoBuf {
             return buffer;
 
         } catch (error) {
-            traceError(` - Error: ${WSMessage.ENCODE_MESSAGE_FAILED} msgName: ${error.toString()}`);
+            traceError(` - Error: ${WSMessage.ENCODE_FAILED} msgName: ${error.toString()}`);
             throw error; // 重新抛出错误，让调用者知道具体失败原因
         }
     }
@@ -165,7 +164,7 @@ export class WSocketProtoBuf {
             }
             return this.decodeData("ExternalMessage", buffer);
         } catch (error) {
-            traceError(` - Error: ${WSMessage.DECODE_MESSAGE_FAILED} error: ${error.toString()}`, error);
+            traceError(` - Error: ${WSMessage.DECODE_FAILED} error: ${error.toString()}`, error);
             return null;
         }
     }
@@ -174,19 +173,19 @@ export class WSocketProtoBuf {
         try {
             const packageObj = this.Builder.build(this.protoPackage);
             if (!packageObj) {
-                traceError(` - Error: ${WSMessage.BUILDER_BUILD_FAILED} protoPackage: ${this.protoPackage}`);
+                throw new Error(`${this.protoPackage} builder build failed`);
             }
 
             let dataMessage = packageObj[respMsgName];
             if (!dataMessage) {
-                traceError(` - Error: ${WSMessage.DECODE_MESSAGE_FAILED} msgName: ${respMsgName}`);
+                traceError(` - Error: ${WSMessage.DECODE_FAILED} msgName: ${respMsgName}`);
             }
             let dataResponse = dataMessage.decode(buffer);
             // 递归循环遍历dataResponse的值， 判断值是否是long，然后调用toNumber();
             longToNumber(dataResponse, this.protobuf.Long);
             return dataResponse;
         } catch (error) {
-            traceError(` - Error: ${WSMessage.DECODE_MESSAGE_FAILED} error: ${error.toString()}`, error);
+            traceError(` - Error: ${WSMessage.DECODE_FAILED} error: ${error.toString()}`, error);
             return null;
         }
     }
