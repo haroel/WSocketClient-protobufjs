@@ -1,9 +1,8 @@
 import * as cc from 'cc';
 const { ccclass, property } = cc._decorator;
-
+import WSocketClient from '@frw/wsocket-client';
 import { proto_config } from './wsockets/proto';
 import { DEBUG } from 'cc/env';
-
 
 @ccclass('Main')
 export class Main extends cc.Component {

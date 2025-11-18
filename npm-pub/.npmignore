@@ -1,0 +1,33 @@
+# 开发文件
+.git/
+.gitignore
+.vscode/
+.idea/
+*.log
+*.swp
+*.swo
+*~
+
+# 文档和说明
+README.md
+CHANGELOG.md
+LICENSE
+
+# 测试文件
+test/
+tests/
+__tests__/
+*.test.js
+*.spec.js
+
+# 构建工具
+build/
+dist/
+*.config.js
+webpack.config.js
+rollup.config.js
+
+# 其他
+.DS_Store
+Thumbs.db
+

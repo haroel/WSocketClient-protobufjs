@@ -3,29 +3,36 @@ const { execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const outdir = path.resolve(__dirname, '../assets/wsockets');
+// NPM 发布目录配置
+const npmPubDir = path.resolve(__dirname, '../npm-pub');
+const npmPubSrcDir = path.join(npmPubDir, 'src');
+const npmPubPackageJsonPath = path.join(npmPubDir, 'package.json');
+
+const outdir = npmPubSrcDir; // 输出到 npm-pub/src
 const outfile = path.join(outdir, 'WSocketClient.js');
-const outfileMin = path.join(outdir, 'WSocketClient.min.js');
 const dtsOutfile = path.join(outdir, 'WSocketClient.d.ts');
 const tempDtsDir = path.resolve(__dirname, 'temp_dts');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
 const wsocketClientPath = path.resolve(__dirname, 'WSocketClient.ts');
+const protobufSourcePath = path.resolve(__dirname, '_protobuf.min.js');
+const protobufTargetPath = path.join(npmPubSrcDir, 'protobuf.min.js');
 
 // 解析命令行参数和环境变量
 const args = process.argv.slice(2);
 // 默认生产模式（压缩），除非明确指定 --no-minify
 const shouldMinify = !args.includes('--no-minify');
-const buildBoth = args.includes('--both') || process.env.BUILD_BOTH === 'true';
 
 // 确保输出目录存在
 fs.mkdirSync(outdir, { recursive: true });
 
-// 读取 WSocketClient.ts 中的 VERSION 并更新 package.json
+// 读取 WSocketClient.ts 中的 VERSION 并更新所有 package.json
 try {
     const wsocketClientContent = fs.readFileSync(wsocketClientPath, 'utf8');
     const versionMatch = wsocketClientContent.match(/public static readonly VERSION\s*=\s*['"]([^'"]+)['"]/);
     if (versionMatch && versionMatch[1]) {
         const version = versionMatch[1];
+        
+        // 更新根目录 package.json
         const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
         if (packageJson.version !== version) {
             packageJson.version = version;
@@ -33,6 +40,18 @@ try {
             console.log(`✅ Updated package.json version to ${version}`);
         } else {
             console.log(`ℹ️  package.json version is already ${version}`);
+        }
+        
+        // 更新 npm-pub/package.json
+        if (fs.existsSync(npmPubPackageJsonPath)) {
+            const npmPubPackageJson = JSON.parse(fs.readFileSync(npmPubPackageJsonPath, 'utf8'));
+            if (npmPubPackageJson.version !== version) {
+                npmPubPackageJson.version = version;
+                fs.writeFileSync(npmPubPackageJsonPath, JSON.stringify(npmPubPackageJson, null, 2) + '\n');
+                console.log(`✅ Updated npm-pub/package.json version to ${version}`);
+            } else {
+                console.log(`ℹ️  npm-pub/package.json version is already ${version}`);
+            }
         }
     } else {
         console.warn('⚠️  Could not find VERSION in WSocketClient.ts');
@@ -54,59 +73,28 @@ const buildConfig = {
 
 // 构建函数
 async function buildFiles() {
-    const builds = [];
+    console.log(`📦 Building ${shouldMinify ? 'production (minified)' : 'development'} version...`);
     
-    if (buildBoth) {
-        // 生成两个版本：开发版（未压缩）和生产版（压缩）
-        console.log('📦 Building both development and production versions...');
-        
-        // 开发版（未压缩）
-        builds.push(
-            build({
-                ...buildConfig,
-                outfile: outfile,
-                minify: false,
-            }).then(() => {
-                console.log(`✅ Development bundle created at ${outfile}`);
-            })
-        );
-        
-        // 生产版（压缩）
-        builds.push(
-            build({
-                ...buildConfig,
-                outfile: outfileMin,
-                minify: true,
-            }).then(() => {
-                const stats = fs.statSync(outfileMin);
-                const sizeKB = (stats.size / 1024).toFixed(2);
-                console.log(`✅ Production bundle (minified) created at ${outfileMin} (${sizeKB} KB)`);
-            })
-        );
+    await build({
+        ...buildConfig,
+        outfile: outfile,
+        minify: shouldMinify,
+    });
+    
+    const stats = fs.statSync(outfile);
+    const sizeKB = (stats.size / 1024).toFixed(2);
+    const minifyStatus = shouldMinify ? 'minified' : 'unminified';
+    console.log(`✅ Bundle created at ${outfile} (${sizeKB} KB, ${minifyStatus})`);
+    
+    // 复制 protobuf.min.js 到 npm-pub/src
+    if (fs.existsSync(protobufSourcePath)) {
+        fs.copyFileSync(protobufSourcePath, protobufTargetPath);
+        const protobufStats = fs.statSync(protobufTargetPath);
+        const protobufSizeKB = (protobufStats.size / 1024).toFixed(2);
+        console.log(`✅ Copied protobuf.min.js to ${protobufTargetPath} (${protobufSizeKB} KB)`);
     } else {
-        // 只生成一个版本
-        // 为了向后兼容，默认输出到 WSocketClient.js（即使压缩）
-        // 如果明确指定 --no-minify，则输出未压缩版本
-        const outputFile = outfile;
-        const mode = shouldMinify ? 'production (minified)' : 'development';
-        
-        console.log(`📦 Building ${mode} version...`);
-        
-        builds.push(
-            build({
-                ...buildConfig,
-                outfile: outputFile,
-                minify: shouldMinify,
-            }).then(() => {
-                const stats = fs.statSync(outputFile);
-                const sizeKB = (stats.size / 1024).toFixed(2);
-                const minifyStatus = shouldMinify ? 'minified' : 'unminified';
-                console.log(`✅ Bundle created at ${outputFile} (${sizeKB} KB, ${minifyStatus})`);
-            })
-        );
+        console.warn(`⚠️  protobuf source file not found: ${protobufSourcePath}`);
     }
-    
-    await Promise.all(builds);
 }
 
 buildFiles().then(() => {
@@ -120,7 +108,7 @@ buildFiles().then(() => {
         // 2. 直接调用 tsc，不再依赖 tsconfig.d.ts.json
         const wsocketsDir = path.resolve(__dirname);
         const filesToCompile = fs.readdirSync(wsocketsDir)
-            .filter(f => f.endsWith('.ts') || f.endsWith('.d.ts'))
+            .filter(f => f.endsWith('.ts'))
             .map(f => path.join('wsockets', f));
         
         const tscCommand = `npx tsc ${filesToCompile.join(' ')} --declaration --emitDeclarationOnly --outDir ${tempDtsDir} --target es2015 --lib es2015,dom --strict false --moduleResolution node --skipLibCheck`;
@@ -215,9 +203,13 @@ buildFiles().then(() => {
 ${stubs.join('\n')}
 
 ${finalContent}
+
+// 导出 WSocketClient 类
+export = WSocketClient;
+export as namespace WSocketClient;
 `;
         
-        // 7. 清理 assets 目录中旧的 .d.ts 文件
+        // 7. 清理输出目录中旧的 .d.ts 文件
         const existingDts = fs.readdirSync(outdir).filter(f => f.endsWith('.d.ts'));
         for (const file of existingDts) {
             fs.unlinkSync(path.join(outdir, file));
@@ -237,6 +229,9 @@ ${finalContent}
             console.log('✅ Temporary files cleaned up.');
         }
     }
+    
+    console.log('\n✅ Build completed successfully! Ready for npm publish.');
+    console.log(`📁 Output directory: ${npmPubDir}`);
 }).catch((e) => {
     console.error('❌ Build failed:', e);
     process.exit(1)

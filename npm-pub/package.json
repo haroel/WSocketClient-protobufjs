@@ -1,0 +1,34 @@
+{
+  "name": "@frw/wsocket-client",
+  "version": "1.4.0",
+  "description": "WebSocket客户端库，支持Protobuf协议",
+  "_url": "https://npm.wedobest.com.cn/-/web/detail/@frw/wsocket-client",
+  "main": "index.js",
+  "types": "src/WSocketClient.d.ts",
+  "files": [
+    "src",
+    "index.js"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "websocket",
+    "ws",
+    "protobufjs",
+    "client",
+    "socket"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "engines": {
+    "node": ">=10.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

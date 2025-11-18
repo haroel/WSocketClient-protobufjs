@@ -140,7 +140,7 @@ declare const WSMessage: {
     DECODE_FAILED: 200011
 };
 declare class WSocketClient {
-    static readonly VERSION = "1.3";
+    static readonly VERSION = "1.4.0";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -426,3 +426,7 @@ declare class WSocketClient {
      * 发送心跳包
      */
 }
+
+// 导出 WSocketClient 类
+export = WSocketClient;
+export as namespace WSocketClient;
