@@ -515,11 +515,14 @@ export class WSocketClient {
             const seqId = external_.seqId;
             this.config.debugMode && trace("receive : ", responseMsgName, seqId);
             if (!responseMsgName) {
-                trace(` - Error: ${WSMessage.CSV_NO_RESPONSE}, seqId: ${seqId}`);
+                trace(` - Error: ${WSMessage.CSV_NO_RESPONSE} ${responseMsgName} - ${seqId}`);
             }
             let hasCallback =  this._listeners.has(seqId) ||  this._on_listeners.has(responseMsgName);
             if (!hasCallback) {
-                // 【提升性能考虑】没有任何地方监听和处理，则认为不需要解码data
+                if (this.config.debugMode) {
+                    // 【提升性能考虑】没有处理函数和监听器，这表明该数据可以被客户端忽略
+                    trace(`${WSMessage.NO_HANDLER} ${responseMsgName} - ${seqId}`);
+                }
                 return;
             }
             const response = {

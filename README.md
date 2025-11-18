@@ -264,7 +264,7 @@ client.config = {
 
 #### 静态属性
 
-- `WSocketClient.VERSION` - 版本号，当前版本为 "1.2"
+- `WSocketClient.VERSION` - 版本号，当前版本为 "1.3"
 - `WSocketClient.NONE` (0) - 初始状态
 - `WSocketClient.DISCONNECTED` (1) - 断连状态
 - `WSocketClient.CONNECTING` (2) - 正在连接状态
@@ -294,7 +294,7 @@ client.config = {
   - `msgName` - 消息名称，必须在 proto_config 中已配置
   - `payload` - 消息负载对象，需要符合对应消息类型的 protobuf 定义
   - `callback(msgName, response)` - 响应回调函数，当收到服务器响应时调用
-  - 返回：如果发送成功，返回请求对象（包含 seqId、time、msgName、callback），否则返回 null
+  - 返回：如果发送成功，返回请求对象（包含 seqId、time、msgName、timeout、callback），否则返回 null
 - `onNTF(msgName, callback, priority?)` - 监听服务器推送消息（通知消息）
   - `msgName` - 消息名称，服务器推送的消息类型
   - `callback(msgName, response)` - 回调函数，当收到对应消息时调用
@@ -527,11 +527,15 @@ WSocketClient 定义了完整的错误码体系，可通过 `WSMessage` 对象�
   - 触发场景：编码消息时，在 protobuf 定义中找不到 ExternalMessage 类型
   - 解决方法：检查 .proto 文件，确保定义了 ExternalMessage 消息类型
 
-- `WSMessage.ENCODE_FAILED` (200005) - 编码消息失败
+- `WSMessage.NO_HANDLER` (200005) - 没有处理函数和监听器，这表明该数据可以被客户端忽略
+  - 触发场景：收到服务器消息时，没有注册对应的处理函数或监听器
+  - 解决方法：检查是否已正确注册消息处理函数或监听器，或者该消息可以被忽略
+
+- `WSMessage.ENCODE_FAILED` (200010) - 编码消息失败
   - 触发场景：将消息对象编码为 Protobuf 二进制数据时失败
   - 解决方法：检查消息对象格式是否正确，是否符合 protobuf 定义
 
-- `WSMessage.DECODE_FAILED` (200006) - 解码消息失败
+- `WSMessage.DECODE_FAILED` (200011) - 解码消息失败
   - 触发场景：将 Protobuf 二进制数据解码为消息对象时失败
   - 解决方法：检查接收到的数据格式是否正确，protobuf 定义是否匹配
 
@@ -550,6 +554,12 @@ WSocketClient 定义了完整的错误码体系，可通过 `WSMessage` 对象�
 MIT License
 
 ## 更新日志
+
+### v1.3
+- 添加 `debugMode` 配置项，支持调试模式输出详细日志
+- 更新错误码定义：添加 `NO_HANDLER` (200005)，修正 `ENCODE_FAILED` (200010) 和 `DECODE_FAILED` (200011) 的错误码
+- 完善 `send` 方法返回值说明，包含 `timeout` 属性
+- 优化类型声明文件，确保与实现代码保持一致
 
 ### v1.2
 - 更新 API 方法名：`setConfig` 更名为 `setProtoConfig`，更清晰地表达方法用途
