@@ -38,7 +38,7 @@ export class Main extends cc.Component {
             this.addLog("onError 错误 :" + error);
         };
         wsocketClient.config.onHeartbeat = (heartbeat: any) => {
-            this.addLog("onHeartbeat 心跳 :" + heartbeat);
+            this.addLog("onHeartbeat 心跳 :" + JSON.stringify(heartbeat.data));
         };
         wsocketClient.config.onHeartbeatTimeout = (heartbeatTimeout: any) => {
             this.addLog("onHeartbeatTimeout 心跳超时 :" + heartbeatTimeout);
@@ -64,7 +64,7 @@ export class Main extends cc.Component {
         wsocketClient.config.onHeartbeatTimeout = (heartbeatTimeout: any) => {
             this.addLog("onHeartbeatTimeout 心跳响应超时 :" + heartbeatTimeout);
         };
-        this.addLog("连接服务器 :" + wsUrl);
+        this.addLog("- 开始连接服务器 :" + wsUrl);
         wsocketClient.connect(wsUrl, (success, client) => {
             if (success) {
                 this.addLog("连接成功,发送登录请求");

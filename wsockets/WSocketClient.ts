@@ -652,7 +652,7 @@ export class WSocketClient {
             } else {
                 trace(` - Error: ${WSMessage.HEARTBEAT_FAILED} heartbeatFailed: ${response}`);
             }
-            this.config.onHeartbeat && this.config.onHeartbeat(this);
+            this.config.onHeartbeat && this.config.onHeartbeat(response);
         });
     }
 }
