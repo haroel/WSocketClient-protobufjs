@@ -25,7 +25,7 @@ export class Main extends cc.Component {
 
         wsocketClient.setProtoConfig(proto_config);
         // 设置调试模式 , 根据Cocos设置是否开启调试模式
-        wsocketClient.config.debugMode = !DEBUG;
+        wsocketClient.config.debugMode = DEBUG;
         wsocketClient.config.connectInterval = 2000;
         wsocketClient.config.onStateChange = (info: any) => {
             this.addLog("onStateChange 连接状态 :" + JSON.stringify(info));
