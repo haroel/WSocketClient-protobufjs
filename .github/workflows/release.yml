@@ -24,7 +24,10 @@ jobs:
           node-version: '18'
 
       - name: Install dependencies
-        run: npm install --only=dev
+        run: |
+          # 临时移除 dependencies，只保留 devDependencies
+          node -e "const pkg=require('./package.json'); delete pkg.dependencies; require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
+          npm install
 
       - name: Build project
         run: npm run build
