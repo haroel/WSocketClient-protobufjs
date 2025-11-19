@@ -26,7 +26,7 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
 export class WSocketClient {
 
     /** WSocketClient 版本 */
-    public static readonly VERSION = '1.4.1';
+    public static readonly VERSION = '1.4.3';
 
     /******************** 状态定义 ********************/
     /**
@@ -121,30 +121,36 @@ export class WSocketClient {
          * 参考 https://forum.cocos.org/t/topic/151320/4
          */
         cacert: "",
+
         /**
-         * 状态变化回调函数
-         * @param state 新的连接状态（NONE、DISCONNECTED、CONNECTING、CONNECTTED）
+         * 连接成功回调
+         * @param type 连接成功类型
+         *         - 1：正常连接成功
+         *         - 2：断线重连成功
          */
-        onStateChange: generateCallback("onStateChange"),
+        onConnected: function (type: number) { },
         /**
-         * 连接超时回调函数（主动断开连接）
-         * 当连接超时时触发
-         * @param client WSocketClient 实例
+         * 连接断开回调
+         * @param type 断开连接类型
+         *         - 1：连接超时
+         *         - 2：断线重连状态重连超时
+         *         - 3：心跳超时
+         *         - 10：断线重连状态错误或断开
+         *         - 11：手动关闭
+         *         - 12：onerror
+         *         - 13：onclose
+         * @param reason 断开连接原因说明
          */
-        onConnectTimeout: generateCallback("onConnectTimeout"),
+        onDisconnect: function (type: number, reason: any) { },
+
         /**
-         * 自动重连开始回调函数
+         * 【非必要】自动重连开始回调函数
          * 当开始自动重连时触发
          * 无参数
          */
         onAutoReconnectStart: generateCallback("onAutoReconnectStart"),
         /**
-         * 自动重连结束回调函数
-         * @param success 重连是否成功（boolean）
-         */
-        onAutoReconnectEnd: generateCallback("onAutoReconnectEnd"),
-        /**
-         * 协议超时回调函数（不会主动断开连接）,每个协议只可能触发一次心跳超时回调
+         * 【非必要】协议超时回调函数（不会主动断开连接）,每个协议只可能触发一次心跳超时回调
          * @param request 超时的请求对象，包含以下属性：
          *   - seqId: 序列号（number）
          *   - time: 发送时间戳（number）
@@ -154,47 +160,16 @@ export class WSocketClient {
          */
         onProtocolTimeout: generateCallback("onProtocolTimeout"),
         /**
-         * 心跳超时回调函数（主动断开连接）
-         * 当心跳响应超时时触发
-         * @param client WSocketClient 实例
-         */
-        onHeartbeatTimeout: generateCallback("onHeartbeatTimeout"),
-        /**
-         * 心跳回调函数
+         * 【非必要】心跳回调函数
          * 每次发送心跳包后触发
          * @param response 心跳响应对象，包含 code（状态码）、data（响应数据）等字段
          */
         onHeartbeat: generateCallback("onHeartbeat"),
         /**
-         * WebSocket 连接打开回调函数
-         * 当 WebSocket 连接成功建立时触发
-         * 无参数
+         * 【非必要】状态变化回调函数
+         * @param state 新的连接状态（NONE、DISCONNECTED、CONNECTING、CONNECTTED）
          */
-        onOpen: generateCallback("onOpen"),
-        /**
-         * WebSocket 连接关闭回调函数
-         * 当 WebSocket 连接关闭时触发
-         * 无参数
-         */
-        onClose: generateCallback("onClose"),
-        /**
-         * WebSocket 错误回调函数
-         * 当 WebSocket 发生错误时触发
-         * 无参数
-         */
-        onError: generateCallback("onError"),
-        /**
-         * 消息接收回调函数
-         * 当收到服务器消息时触发（在消息分发到具体回调之前触发，可以在这里对消息进行统一拦截处理）
-         * @param msg 解码后的外部消息对象，包含以下属性：
-         *   - cmdCode: 命令码（number）
-         *   - cmdMerge: 合并命令码（number）
-         *   - seqId: 序列号（number）
-         *   - msgName: 消息名称（string）
-         *   - data: 消息数据（根据 protobuf 定义的实际类型）
-         */
-        onMessage: function (msg) { },
-
+        onStateChange: generateCallback("onStateChange"),
     }
 
     private static _instance: WSocketClient = null;
@@ -266,45 +241,7 @@ export class WSocketClient {
     public get state() {
         return this._state;
     }
-    /**
-     * 设置连接状态
-     * 状态变化时会触发相应的回调函数和内部逻辑
-     * @param val 新的状态值（NONE、DISCONNECTED、CONNECTING、CONNECTTED）
-     */
-    public setState(val: number) {
-        if (this._state === val) {
-            return;
-        };
-        let info = {
-            from: this._state,
-            to: val
-        }
-        this._state = val;
-        switch (val) {
-            case WSocketClient.DISCONNECTED: {
-                this._listeners.clear();
-                this._stopTicker();
-                this._invokeConnect(false);
-                break;
-            }
-            case WSocketClient.CONNECTING: {
-                this._connectTime = Date.now();
-                this._startTicker();
-                break;
-            }
-            case WSocketClient.CONNECTTED: {
-                this._seqid = 1;
-                this._isInReconnect = false;
-                this._invokeConnect(true);
-                this._lastHeartbeatResponseTime = Date.now();
-                // 连接后立即发送心跳包获取服务器时间
-                this._sendHeartbeat();
-                break;
-            }
-        }
-        this.config.debugMode && trace(`State: ${JSON.stringify(info)}`);
-        this.config.onStateChange && this.config.onStateChange(info);
-    }
+
 
     private _ping = 0;
     /**
@@ -339,17 +276,18 @@ export class WSocketClient {
      * 调用后需要重新调用 setConfig 和 connect 才能使用
      */
     public reset() {
-        this.close();
+        this._connectCallback = null;
         this._listeners.clear();
         this._on_listeners.clear();
+        this.close();
         this._stopTicker();
-        this._connectCallback = null;
+        this.protobufUtil = null;
         this._wsocket = null;
         this._state = WSocketClient.NONE;
         this._lastHeartbeatTime = 0;
         this._connectTime = 0;
+        this._isInReconnect = false;
         this._isProtoLoaded = false;
-        this.protobufUtil = null;
     }
 
     /**
@@ -369,7 +307,45 @@ export class WSocketClient {
         this.protobufUtil.setConfig(proto_config.protoName, proto_config);
         this._isProtoLoaded = true;
     }
-
+    /**
+     * 设置连接状态
+     * 状态变化时会触发相应的回调函数和内部逻辑
+     * @param val 新的状态值（NONE、DISCONNECTED、CONNECTING、CONNECTTED）
+     */
+    public setState(val: number) {
+        if (this._state === val) {
+            return;
+        };
+        let info = {
+            from: this._state,
+            to: val
+        }
+        this._state = val;
+        switch (val) {
+            case WSocketClient.DISCONNECTED: {
+                this._listeners.clear();
+                this._stopTicker();
+                this._invokeConnect(false);
+                break;
+            }
+            case WSocketClient.CONNECTING: {
+                this._connectTime = Date.now();
+                this._startTicker();
+                break;
+            }
+            case WSocketClient.CONNECTTED: {
+                this._seqid = 1;
+                this.config.onConnected(this.isReconnecting ? 2 : 1);
+                this._invokeConnect(true);
+                this._lastHeartbeatResponseTime = Date.now();
+                // 连接后立即发送心跳包获取服务器时间
+                this._sendHeartbeat();
+                break;
+            }
+        }
+        this.config.debugMode && trace(`State: ${JSON.stringify(info)}`);
+        this.config.onStateChange(info);
+    }
     /**
      * 连接 WebSocket 服务器
      * 请确保在调用此方法之前已经调用了 setConfig
@@ -383,11 +359,18 @@ export class WSocketClient {
             trace(`Error: ${WSMessage.CALL_ERROR}`);
             return callback && callback(false, this);
         }
-        if (this._state == WSocketClient.CONNECTTED) {
-            return callback && callback(true, this);
-        } else if (this._state == WSocketClient.CONNECTING) {
-            trace(`Error: ${WSMessage.CONNECTING_REPEAT_ERROR}`);
-            return callback && callback(false, this);
+        let url_ = this.url;
+        if (url_ && url_ !== serverURL) {
+            trace(`Error: ${url_} != ${serverURL}`);
+            this._invokeConnect(false);
+            this.close();
+        } else {
+            if (this._state == WSocketClient.CONNECTTED) {
+                return callback && callback(true, this);
+            } else if (this._state == WSocketClient.CONNECTING) {
+                trace(`Error: ${WSMessage.CONNECTING_REPEAT_ERROR}`);
+                return callback && callback(false, this);
+            }
         }
         this._connectCallback = callback;
         this.setState(WSocketClient.CONNECTING);
@@ -406,18 +389,21 @@ export class WSocketClient {
         }
     }
 
+    private _disconnect() {
+        if (this._wsocket) {
+            this._wsocket.close();
+        }
+        this._listeners.clear();
+        this._stopTicker();
+        this.setState(WSocketClient.DISCONNECTED);
+    }
     /**
      * 关闭 WebSocket 连接
      * @param code WebSocket 关闭代码，默认为 -1。标准关闭代码：1000=正常关闭，1001=端点离开，1006=异常关闭
      */
-    public close(code: number = -1) {
-        if (this._wsocket) {
-            this._wsocket.close();
-        }
-        this._connectCallback = null;
-        this._listeners.clear();
-        this._stopTicker();
-        this.setState(WSocketClient.DISCONNECTED);
+    public close() {
+        this._disconnect();
+        this.config.onDisconnect(11, "close");
     }
     /**
      * 发送消息到服务器
@@ -522,7 +508,6 @@ export class WSocketClient {
     private _data(data: any) {
         let external_ = this.protobufUtil.decodeResponse(data);
         if (external_) {
-            this.config.onMessage && this.config.onMessage(external_);
             let item = null;
             if (external_.cmdCode === 0) {
                 // 心跳响应
@@ -569,36 +554,43 @@ export class WSocketClient {
             }
         }
     }
+
+    private _checkReconnect(state: number) {
+        // autoReconnect模式，满足条件则自动重连
+        if (state === WSocketClient.CONNECTTED && this.config.autoReconnect && !this._isInReconnect) {
+            // 从连接变成close状态，则开启断线重连
+            this._isInReconnect = true;
+            trace("onAutoReconnectStart")
+            this.config.onAutoReconnectStart();
+            // 重新连接
+            this.connect(this.url, (success: boolean, client: WSocketClient) => {
+                trace("autoReconnect " + success);
+                this._isInReconnect = false;
+            });
+        }
+    }
     private _wsHandler(event: string, data: any) {
+        let last = this._state;
+        let isReconnecting = this.isReconnecting;
         switch (event) {
             case "onmessage": {
                 this._data(data);
                 break;
             }
-            case "onclose":
-                let lastState = this._state;
-                this.close();
-                // autoReconnect模式，满足条件则自动重连
-                if (lastState === WSocketClient.CONNECTTED && this.config.autoReconnect && !this._isInReconnect) {
-                    // 从连接变成close状态，则开启断线重连
-                    this._isInReconnect = true;
-                    this.config.onAutoReconnectStart && this.config.onAutoReconnectStart();
-                    // 重新连接
-                    this.connect(this.url, (success: boolean, client: WSocketClient) => {
-                        this._isInReconnect = false;
-                        this.config.onAutoReconnectEnd && this.config.onAutoReconnectEnd(success);
-                    });
-                } else {
-                    // 非autoReconnect模式，则直接触发onClose回调
-                    this.config.onClose && this.config.onClose();
-                }
+            case "onclose": {
+                this._disconnect();
+                this.config.onDisconnect(isReconnecting ? 10 : 11, data);
+                this._checkReconnect(last)
                 break;
-            case "onerror":
-                this.config.onError && this.config.onError();
+            }
+            case "onerror": {
+                this._disconnect();
+                this.config.onDisconnect(isReconnecting ? 10 : 12, data);
+                this._checkReconnect(last);
                 break;
+            }
             case "onopen": {
                 this.setState(WSocketClient.CONNECTTED);
-                this.config.onOpen && this.config.onOpen();
                 break;
             }
             default:
@@ -626,14 +618,15 @@ export class WSocketClient {
                 }
             }
         }
-        switch (this._state) {
+        let state = this._state;
+        let isReconnecting = this.isReconnecting;
+        switch (state) {
             case WSocketClient.CONNECTING: {
                 if ((Date.now() - this._connectTime) > this.config.connectTimeout) {
                     // 连接超时
-                    trace(` - Error: ${WSMessage.CONNECT_TIMEOUT} connectTimeout: ${this.config.connectTimeout}`);
-                    this.close();
-                    this.config.onConnectTimeout && this.config.onConnectTimeout(this);
-                    this.config.onClose && this.config.onClose();
+                    trace(` - Error: ${WSMessage.CONNECT_TIMEOUT}`);
+                    this._disconnect();
+                    this.config.onDisconnect(isReconnecting ? 2 : 1, "reconnectTimeout");
                 }
                 break;
             }
@@ -641,10 +634,10 @@ export class WSocketClient {
                 const nt = Date.now();
                 if ((nt - this._lastHeartbeatResponseTime) > this.config.heartbeatTimeout) {
                     // 心跳响应超时
-                    trace(` - Error: ${WSMessage.HEARTBEAT_TIMEOUT} heartbeatTimeout: ${this.config.heartbeatTimeout}`);
-                    this.close();
-                    this.config.onHeartbeatTimeout && this.config.onHeartbeatTimeout(this);
-                    this.config.onClose && this.config.onClose();
+                    trace(` - Error: ${WSMessage.HEARTBEAT_TIMEOUT}`);
+                    this._disconnect();
+                    this.config.onDisconnect(3, "heartbeatTimeout");
+                    this._checkReconnect(state);
                 } else if ((nt - this._lastHeartbeatTime) > this.config.heartbeatInterval) {
                     // 心跳间隔，发送一个心跳
                     this._sendHeartbeat();

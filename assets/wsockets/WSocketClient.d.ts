@@ -409,21 +409,4 @@ declare class WSocketClient {
      * @param callback 可选，要移除的特定回调函数。如果不传此参数，则删除该消息名称下的所有回调函数
      */
     offNTF(msgName: string, callback?: (msgName: string, playload: any) => void): void;
-    /**
-     * 处理接收到的数据
-     * @param data 接收到的数据
-     */
-    /**
-     * WS状态检测
-     */
-    /**
-     * 停止ticker检测
-     */
-    /**
-     * 发送心跳包
-     */
 }
-
-// 导出 WSocketClient 类
-export = WSocketClient;
-export as namespace WSocketClient;

@@ -45,7 +45,7 @@ export class WSocket {
 
     private _reconnectTimer = null;
 
-    constructor(serverURL: string, opts:(typeof this.opts)) {
+    constructor(serverURL: string, opts: (typeof this.opts)) {
         this.url = serverURL;
         this.opts = opts;
         this.connect(serverURL);
@@ -72,12 +72,12 @@ export class WSocket {
             this.ws = null;
             ws.close();
         }
-        trace(`connect ${this.url}`);
+        trace(`connect ${this.url} ${JSON.stringify(this.opts)}`);
         // let AdapterWebSocket = wshandlerHelper.getWebSocketClass();
         let AdapterWebSocket: any = WSocket.class;
-        let ws : WebSocketInterface = null;
-        if(this.opts.cacert) {
-           //android平台，低版本引擎ws需要加入CA证书才能使用wss
+        let ws: WebSocketInterface = null;
+        if (this.opts.cacert) {
+            //android平台，低版本引擎ws需要加入CA证书才能使用wss
             ws = new AdapterWebSocket(this.url, [], this.opts.cacert);
             trace("cacert", this.opts.cacert);
         } else {
@@ -102,14 +102,21 @@ export class WSocket {
     }
 
     private _reconnect() {
+        if (this._reconnectTimer) {
+            // trace("正在重连中")
+            return true;
+        }
         if (this.opts.retry > 0) {
             this.opts.retry--;
+            // trace("延时 重连 ",this.opts.retry)
             this._reconnectTimer = setTimeout(() => {
                 clearTimeout(this._reconnectTimer);
                 this._reconnectTimer = null;
                 this.connect(this.url);
             }, this.opts.interval);
+            return true;
         }
+        return false;
     }
     public send(arrayBuffer: ArrayBuffer) {
         if (this.ws) {
@@ -122,6 +129,7 @@ export class WSocket {
      */
     public close() {
         if (this._reconnectTimer) {
+            // trace(" clear timer")
             clearTimeout(this._reconnectTimer);
             this._reconnectTimer = null;
         }
@@ -149,19 +157,17 @@ export class WSocket {
     private onerror(ws: WebSocketInterface, event) {
         traceError(` ${this.url} onerror`, event)
         if (this.ws && ws["uuid"] === this.ws["uuid"]) {
-            if (this.opts.retry > 0) {
-                return this._reconnect();
+            if (!this._reconnect()) {
+                this._callback("onerror", event)
             }
-            this._callback("onerror", event)
         }
     }
     private onclose(ws: WebSocketInterface, event) {
         trace(`${this.url} onclose   `, event)
         if (this.ws && ws["uuid"] === this.ws["uuid"]) {
-            if (this.opts.retry > 0) {
-                return this._reconnect();
+            if (!this._reconnect()) {
+                this._callback("onclose", event)
             }
-            this._callback("onclose", event)
         }
     }
     private onmessage(ws: WebSocketInterface, event) {

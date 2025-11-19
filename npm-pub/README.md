@@ -22,7 +22,7 @@
 ```bash
 npm i protobufjs-cli -S
 # // 私有源仓库
-npm i @frw/wsocket-client -S
+npm i @frw/wsocket-client@latest -S
 ```
 
 注意：
@@ -99,9 +99,9 @@ client.config = {
     /**
      * 连接重连间隔（毫秒）
      * 每次重连之间的等待时间
-     * @default 5000
+     * @default 3000
      */
-    connectInterval: 5000,
+    connectInterval: 3000,
     
     /**
      * 连接超时时间（毫秒）
@@ -151,93 +151,73 @@ client.config = {
      */
     cacert: "",
     
+    /******************** 必要回调 ********************/
+    
     /**
-     * 状态变化回调函数
-     * @param state 新的连接状态（NONE、DISCONNECTED、CONNECTING、CONNECTTED）
+     * 连接成功回调（必须实现）
+     * @param type 连接成功类型
+     *         - 1：正常连接成功
+     *         - 2：断线重连成功
+     */
+    onConnected: (type) => {
+        console.log("连接成功", type === 1 ? "正常连接" : "断线重连");
+    },
+    
+    /**
+     * 连接断开回调（必须实现）
+     * @param type 断开连接类型
+     *         - 1：连接超时
+     *         - 2：断线重连状态重连超时
+     *         - 3：心跳超时
+     *         - 10：断线重连状态错误或断开
+     *         - 11：手动关闭
+     *         - 12：onerror
+     *         - 13：onclose
+     * @param reason 断开连接原因说明
+     */
+    onDisconnect: (type, reason) => {
+        console.log("连接断开", type, reason);
+    },
+    
+    /******************** 可选回调（非必要） ********************/
+    
+    /**
+     * 【非必要】状态变化回调函数
+     * @param state 状态变化对象 { from: 旧状态, to: 新状态 }
      */
     onStateChange: (state) => {
         console.log("状态变化", state);
     },
     
     /**
-     * 连接超时回调函数（主动断开连接）
-     * 当连接超时时触发
-     */
-    onConnectTimeout: () => {
-        console.log("连接超时");
-    },
-    
-    /**
-     * 自动重连开始回调函数
-     * 当开始自动重连时触发
+     * 【非必要】自动重连开始回调函数
+     * 当开始自动重连时触发，无参数
      */
     onAutoReconnectStart: () => {
-        console.log("开始重连");
+        console.log("开始自动重连");
     },
     
     /**
-     * 自动重连结束回调函数
-     * @param success 重连是否成功
-     */
-    onAutoReconnectEnd: (success) => {
-        console.log("重连结果", success);
-    },
-    
-    /**
-     * 协议超时回调函数（不会主动断开连接），每个协议只可能触发一次心跳超时回调
-     * @param request 超时的请求对象，包含 seqId、time、msgName 等信息
+     * 【非必要】协议超时回调函数
+     * 不会主动断开连接，每个协议只可能触发一次
+     * @param request 超时的请求对象，包含以下属性：
+     *   - seqId: 序列号（number）
+     *   - time: 发送时间戳（number）
+     *   - msgName: 消息名称（string）
+     *   - timeout: 是否已超时（boolean）
+     *   - callback: 原始回调函数
      */
     onProtocolTimeout: (request) => {
         console.log("协议超时", request);
     },
     
     /**
-     * 心跳超时回调函数（主动断开连接）
-     * 当心跳响应超时时触发
-     */
-    onHeartbeatTimeout: () => {
-        console.log("心跳超时");
-    },
-    
-    /**
-     * 心跳回调函数
+     * 【非必要】心跳回调函数
      * 每次发送心跳包后触发
+     * @param response 心跳响应对象，包含 code（状态码）、data（响应数据）等字段
      */
-    onHeartbeat: () => {
-        console.log("心跳");
-    },
-    
-    /**
-     * WebSocket 连接打开回调函数
-     * 当 WebSocket 连接成功建立时触发
-     */
-    onOpen: () => {
-        console.log("连接已打开");
-    },
-    
-    /**
-     * WebSocket 连接关闭回调函数
-     * 当 WebSocket 连接关闭时触发
-     */
-    onClose: () => {
-        console.log("连接已关闭");
-    },
-    
-    /**
-     * WebSocket 错误回调函数
-     * 当 WebSocket 发生错误时触发
-     */
-    onError: () => {
-        console.log("连接错误");
-    },
-    
-    /**
-     * 消息接收回调函数
-     * 当收到服务器消息时触发（在消息分发到具体回调之前触发，可以在这里对消息进行统一拦截处理）
-     * @param msg 解码后的外部消息对象
-     */
-    onMessage: (msg) => {
-        console.log("收到消息", msg);
+    onHeartbeat: (response) => {
+        console.log("心跳", response);
     }
 };
 ```
@@ -302,50 +282,6 @@ client.config = {
 #### 其他属性
 
 - `protobufUtil` - Protobuf 辅助对象，用于处理 protobuf 消息的编码和解码
-
-### 完整示例
-
-```typescript
-import { proto_config } from './wsockets/proto';
-
-// 获取客户端实例
-const client = WSocketClient.getInstance();
-
-// 配置回调
-client.config.onStateChange = (state) => {
-    console.log("连接状态:", state);
-};
-
-client.config.onMessage = (msg) => {
-    console.log("收到消息:", msg);
-};
-
-// 设置协议配置（必须在连接前调用）
-client.setProtoConfig(proto_config);
-
-// 连接服务器
-client.connect("ws://localhost:8080/websocket", (success, client) => {
-    if (success) {
-        console.log("连接成功");
-        
-        // 发送登录请求
-        client.send("LoginReq", { accountId: "user123" }, (msgName, response) => {
-            if (response.code === 0) {
-                console.log("登录成功", response.data);
-                
-                // 监听推送消息
-                client.onNTF("UserMessage", (msgName, response) => {
-                    console.log("收到用户消息", response.data);
-                });
-            }
-        });
-    }
-});
-
-// 获取服务器时间
-const serverTime = client.serverTime;
-console.log("服务器时间:", new Date(serverTime));
-```
 
 ## Proto 转换工具使用
 
