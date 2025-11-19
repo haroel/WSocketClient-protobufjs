@@ -246,52 +246,69 @@ declare class WSocketClient {
         /**
          * 连接超时回调函数（主动断开连接）
          * 当连接超时时触发
+         * @param client WSocketClient 实例
          */
         onConnectTimeout: (...args: any[]) => void;
         /**
          * 自动重连开始回调函数
          * 当开始自动重连时触发
+         * 无参数
          */
         onAutoReconnectStart: (...args: any[]) => void;
         /**
          * 自动重连结束回调函数
-         * @param success 重连是否成功
+         * @param success 重连是否成功（boolean）
          */
         onAutoReconnectEnd: (...args: any[]) => void;
         /**
          * 协议超时回调函数（不会主动断开连接）,每个协议只可能触发一次心跳超时回调
-         * @param request 超时的请求对象，包含 seqId、time、msgName 等信息
+         * @param request 超时的请求对象，包含以下属性：
+         *   - seqId: 序列号（number）
+         *   - time: 发送时间戳（number）
+         *   - msgName: 消息名称（string）
+         *   - timeout: 是否已超时（boolean）
+         *   - callback: 原始回调函数
          */
         onProtocolTimeout: (...args: any[]) => void;
         /**
          * 心跳超时回调函数（主动断开连接）
          * 当心跳响应超时时触发
+         * @param client WSocketClient 实例
          */
         onHeartbeatTimeout: (...args: any[]) => void;
         /**
          * 心跳回调函数
          * 每次发送心跳包后触发
+         * @param response 心跳响应对象，包含 code（状态码）、data（响应数据）等字段
          */
         onHeartbeat: (...args: any[]) => void;
         /**
          * WebSocket 连接打开回调函数
          * 当 WebSocket 连接成功建立时触发
+         * 无参数
          */
         onOpen: (...args: any[]) => void;
         /**
          * WebSocket 连接关闭回调函数
          * 当 WebSocket 连接关闭时触发
+         * 无参数
          */
         onClose: (...args: any[]) => void;
         /**
          * WebSocket 错误回调函数
          * 当 WebSocket 发生错误时触发
+         * 无参数
          */
         onError: (...args: any[]) => void;
         /**
          * 消息接收回调函数
          * 当收到服务器消息时触发（在消息分发到具体回调之前触发，可以在这里对消息进行统一拦截处理）
-         * @param msg 解码后的外部消息对象
+         * @param msg 解码后的外部消息对象，包含以下属性：
+         *   - cmdCode: 命令码（number）
+         *   - cmdMerge: 合并命令码（number）
+         *   - seqId: 序列号（number）
+         *   - msgName: 消息名称（string）
+         *   - data: 消息数据（根据 protobuf 定义的实际类型）
          */
         onMessage: (msg: any) => void;
     };
