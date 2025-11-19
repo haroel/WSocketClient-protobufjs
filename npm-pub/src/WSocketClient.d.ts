@@ -140,7 +140,8 @@ declare const WSMessage: {
     DECODE_FAILED: 200011
 };
 declare class WSocketClient {
-    static readonly VERSION = "1.4.0";
+    /** WSocketClient 版本 */
+    static readonly VERSION = "1.4.1";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -402,7 +403,8 @@ declare class WSocketClient {
     };
     /**
      * 监听服务器推送消息（通知消息）
-     * 可以为同一个消息名称注册多个回调函数，按优先级排序执行
+     * - 可以为同一个消息名称注册多个回调函数，按优先级排序执行
+     * - 除了NTF推送，该接口可以监听服务器的任意消息数据，包括CS模式请求返回
      * @param msgName 消息名称，服务器推送的消息类型
      * @param callback 回调函数，当收到对应消息时调用
      * @param callback.msgName 消息名称
@@ -416,6 +418,10 @@ declare class WSocketClient {
      * @param callback 可选，要移除的特定回调函数。如果不传此参数，则删除该消息名称下的所有回调函数
      */
     offNTF(msgName: string, callback?: (msgName: string, playload: any) => void): void;
+    /**
+     * 处理接收到的数据
+     * @param data 接收到的数据
+     */
     /**
      * WS状态检测
      */

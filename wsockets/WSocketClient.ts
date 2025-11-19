@@ -24,7 +24,10 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
  * 使用 protobuf 进行消息序列化和反序列化
  */
 export class WSocketClient {
-    public static readonly VERSION = '1.4.0';
+
+    /** WSocketClient 版本 */
+    public static readonly VERSION = '1.4.1';
+
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -58,7 +61,7 @@ export class WSocketClient {
          * 是否开启调试模式，开启后会输出调试日志
          * @default false
          */
-        debugMode : false,
+        debugMode: false,
         /**
          * WebSocket 类构造函数，默认使用浏览器自带的 WebSocket
          * 可以替换为自定义的 WebSocket 实现（如 Node.js 的 ws 库）
@@ -105,7 +108,7 @@ export class WSocketClient {
          * WS状态检测间隔时间（毫秒）
          * @default 1000
          */
-        tickInterval:1000,
+        tickInterval: 1000,
         /**
          * 自动断线重连，默认开启
          * 当连接意外断开时，是否自动尝试重新连接
@@ -230,7 +233,7 @@ export class WSocketClient {
     private _on_listeners: Map<string, Array<any>> = new Map();
 
     private _connectCallback: (success: boolean, client: WSocketClient) => void = null;
-    private _invokeConnect(result: boolean){
+    private _invokeConnect(result: boolean) {
         let callback = this._connectCallback;
         this._connectCallback = null;
         callback && callback(result, this);
@@ -256,12 +259,13 @@ export class WSocketClient {
             return;
         };
         let info = {
-            from:this._state,
-            to:val
+            from: this._state,
+            to: val
         }
         this._state = val;
         switch (val) {
             case WSocketClient.DISCONNECTED: {
+                this._listeners.clear();
                 this._stopTicker();
                 this._invokeConnect(false);
                 break;
@@ -281,10 +285,9 @@ export class WSocketClient {
                 break;
             }
         }
-        this.config.debugMode && trace(`State Change: ${JSON.stringify(info)}`);
+        this.config.debugMode && trace(`State: ${JSON.stringify(info)}`);
         this.config.onStateChange && this.config.onStateChange(info);
     }
-
 
     private _ping = 0;
     /**
@@ -320,8 +323,8 @@ export class WSocketClient {
      */
     public reset() {
         this.close();
-         this._listeners.clear();
-         this._on_listeners.clear();
+        this._listeners.clear();
+        this._on_listeners.clear();
         this._stopTicker();
         this._connectCallback = null;
         this._wsocket = null;
@@ -369,7 +372,6 @@ export class WSocketClient {
             trace(`Error: ${WSMessage.CONNECTING_REPEAT_ERROR}`);
             return callback && callback(false, this);
         }
-        this.config.debugMode && trace(`Connect: ${serverURL}`);
         this._connectCallback = callback;
         this.setState(WSocketClient.CONNECTING);
         if (!this._wsocket) {
@@ -396,7 +398,7 @@ export class WSocketClient {
             this._wsocket.close();
         }
         this._connectCallback = null;
-         this._listeners.clear();
+        this._listeners.clear();
         this._stopTicker();
         this.setState(WSocketClient.DISCONNECTED);
     }
@@ -426,10 +428,10 @@ export class WSocketClient {
                         /**
                          * 是否已发送心跳超时
                          */
-                        timeout:false,
+                        timeout: false,
                         callback: callback
                     };
-                     this._listeners.set(seqID, request);
+                    this._listeners.set(seqID, request);
                     return request;
                 }
             }
@@ -447,7 +449,8 @@ export class WSocketClient {
 
     /**
      * 监听服务器推送消息（通知消息）
-     * 可以为同一个消息名称注册多个回调函数，按优先级排序执行
+     * - 可以为同一个消息名称注册多个回调函数，按优先级排序执行
+     * - 除了NTF推送，该接口可以监听服务器的任意消息数据，包括CS模式请求返回
      * @param msgName 消息名称，服务器推送的消息类型
      * @param callback 回调函数，当收到对应消息时调用
      * @param callback.msgName 消息名称
@@ -455,9 +458,9 @@ export class WSocketClient {
      * @param priority 优先级，默认 0，数值越大优先级越高，相同优先级的按注册顺序执行
      */
     public onNTF(msgName: string, callback: (msgName: string, response: any) => void, priority = 0) {
-        let arr =  this._on_listeners.get(msgName);
+        let arr = this._on_listeners.get(msgName);
         if (!arr) {
-             this._on_listeners.set(msgName, [{
+            this._on_listeners.set(msgName, [{
                 priority: priority,
                 callback: callback
             }]);
@@ -477,24 +480,28 @@ export class WSocketClient {
      * @param callback 可选，要移除的特定回调函数。如果不传此参数，则删除该消息名称下的所有回调函数
      */
     public offNTF(msgName: string, callback?: (msgName: string, playload: any) => void) {
-        let arr =  this._on_listeners.get(msgName);
+        let arr = this._on_listeners.get(msgName);
         if (arr) {
             if (callback && typeof callback === "function") {
                 for (let i = 0; i < arr.length; i++) {
                     if (arr[i].callback === callback) {
                         arr.splice(i, 1);
                         if (arr.length === 0) {
-                             this._on_listeners.delete(msgName);
+                            this._on_listeners.delete(msgName);
                         }
                     }
                 }
             } else {
                 arr.length = 0;
-                 this._on_listeners.delete(msgName);
+                this._on_listeners.delete(msgName);
             }
         }
     }
 
+    /**
+     * 处理接收到的数据
+     * @param data 接收到的数据
+     */
     private _data(data: any) {
         let external_ = this.protobufUtil.decodeResponse(data);
         if (external_) {
@@ -517,7 +524,7 @@ export class WSocketClient {
             if (!responseMsgName) {
                 trace(` - Error: ${WSMessage.CSV_NO_RESPONSE} ${responseMsgName} - ${seqId}`);
             }
-            let hasCallback =  this._listeners.has(seqId) ||  this._on_listeners.has(responseMsgName);
+            let hasCallback = this._listeners.has(seqId) || this._on_listeners.has(responseMsgName);
             if (!hasCallback) {
                 if (this.config.debugMode) {
                     // 【提升性能考虑】没有处理函数和监听器，这表明该数据可以被客户端忽略
@@ -530,13 +537,13 @@ export class WSocketClient {
                 data: this.protobufUtil.decodeData(responseMsgName, external_.data),
                 msgName: responseMsgName
             }
-            let request =  this._listeners.get(seqId);
+            let request = this._listeners.get(seqId);
             if (request) {
-                 this._listeners.delete(seqId);
+                this._listeners.delete(seqId);
                 request.callback(requestMsgName, response);
                 request.callback = null;
             }
-            let arr =  this._on_listeners.get(responseMsgName);
+            let arr = this._on_listeners.get(responseMsgName);
             if (arr) {
                 let arr_ = arr.slice();
                 for (let item of arr_) {
@@ -564,7 +571,7 @@ export class WSocketClient {
                         this._isInReconnect = false;
                         this.config.onAutoReconnectEnd && this.config.onAutoReconnectEnd(success);
                     });
-                }else{
+                } else {
                     // 非autoReconnect模式，则直接触发onClose回调
                     this.config.onClose && this.config.onClose();
                 }
@@ -594,7 +601,7 @@ export class WSocketClient {
         const protocolTimeout = this.config.protocolTimeout;
         if (protocolTimeout > 0) {
             let nt = Date.now();
-            for (let item of  this._listeners.values()) {
+            for (let item of this._listeners.values()) {
                 if (!item.timeout && (nt - item.time) > protocolTimeout) {
                     item.timeout = true;
                     trace(` - Error: ${WSMessage.PROTOCOL_TIMEOUT} : ${item.msgName} seqId: ${item.seqId}`);
@@ -646,10 +653,10 @@ export class WSocketClient {
         this.send(__ping_msg[1], { clientTime: Date.now() }, (msgName: string, response: any) => {
             if (response.code === 0) {
                 this._lastHeartbeatResponseTime = Date.now();
-                if(response.serverTime){
+                if (response.serverTime) {
                     // trace(" serverTime : ", response.serverTime);
                     this._ping = response.serverTime - Date.now();
-                }else{
+                } else {
                     this.config.debugMode && trace(` Heartbeat ${JSON.stringify(response)}`);
                 }
             } else {
