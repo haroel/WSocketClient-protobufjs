@@ -189,10 +189,11 @@ client.config = {
      *         - 11：手动关闭
      *         - 12：onerror
      *         - 13：onclose
+     * @param autoRetryConnect 是否会自动重试连接，true表示内部将自动去重连，false表示不会重连需要客户端弹窗提示
      * @param reason 断开连接原因说明
      */
-    onDisconnect: (type, reason) => {
-        console.log("连接断开", type, reason);
+    onDisconnect: (type, autoRetryConnect, reason) => {
+        console.log("连接断开", type, autoRetryConnect, reason);
     },
     
     /******************** 可选回调（非必要） ********************/

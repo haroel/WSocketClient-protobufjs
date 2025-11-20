@@ -45,11 +45,10 @@ export class Main extends cc.Component {
         wsocketClient.config.onConnected = function (type) {
             self.addLog("onConnected 连接成功 " + type);
         }
-        wsocketClient.config.onDisconnect = (type, reason) => {
+        wsocketClient.config.onDisconnect = (type, autoRetryConnect, reason) => {
             switch (type) {
                 case 1:
                     this.addLog("onDisconnect 连接超时（已按config配置做了重连处理）, reason " + reason);
-                    this.addLog("请弹窗让用户选择是否重连");
                     break;
                 case 2:
                     this.addLog("onDisconnect 断线重连状态重连超时, reason " + reason);
@@ -73,6 +72,9 @@ export class Main extends cc.Component {
                     this.addLog("onDisconnect 断开连接原因说明" + reason);
                     break;
             }
+            if (!autoRetryConnect){
+                this.addLog("请弹窗让用户来选择是否再次重连 !!", true);
+            }
         }
         this.addLog("- 开始连接服务器 :" + wsUrl);
         wsocketClient.connect(wsUrl, (success, client) => {
@@ -87,7 +89,7 @@ export class Main extends cc.Component {
         });
     }
 
-    private addLog(log: string) {
+    private addLog(log: string, showError:boolean = false) {
         const logItem = cc.instantiate(this.lineLog);
         // 获取当前时间（时分秒）
         const now = new Date();
@@ -98,6 +100,9 @@ export class Main extends cc.Component {
         let scrollView = this.scrollView.getComponent(cc.ScrollView);
         logItem.active = true;
         logItem.setPosition(-scrollView.getComponent(cc.UITransform).contentSize.width / 2 + 10, 0);
+        if (showError){
+            logItem.getComponent(cc.Label).color = cc.Color.RED;
+        }
         scrollView.content.addChild(logItem);
         scrollView.scrollToBottom(0.2);
     }

@@ -141,7 +141,7 @@ declare const WSMessage: {
 };
 declare class WSocketClient {
     /** WSocketClient 版本 */
-    static readonly VERSION = "1.4.4";
+    static readonly VERSION = "1.4.5";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -255,9 +255,10 @@ declare class WSocketClient {
          *         - 11：手动关闭
          *         - 12：onerror
          *         - 13：onclose
-         * @param reason 断开连接原因说明
+         * @param autoRetryConnect 是否会自动重试连接，true表示内部将自动去重连，false表示不会重连需要客户端弹窗提示
+         * @param reason           断开连接原因说明
          */
-        onDisconnect: (type: number, reason: any) => void;
+        onDisconnect: (type: number, autoRetryConnect: boolean, reason: any) => void;
         /**
          * 【非必要】自动重连开始回调函数
          * 当开始自动重连时触发
