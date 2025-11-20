@@ -26,7 +26,7 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
 export class WSocketClient {
 
     /** WSocketClient 版本 */
-    public static readonly VERSION = '1.4.3';
+    public static readonly VERSION = '1.4.4';
 
     /******************** 状态定义 ********************/
     /**
@@ -402,8 +402,10 @@ export class WSocketClient {
      * @param code WebSocket 关闭代码，默认为 -1。标准关闭代码：1000=正常关闭，1001=端点离开，1006=异常关闭
      */
     public close() {
-        this._disconnect();
-        this.config.onDisconnect(11, "close");
+        if (this.state !== WSocketClient.DISCONNECTED) {
+            this._disconnect();
+            this.config.onDisconnect(11, "close");
+        }
     }
     /**
      * 发送消息到服务器
@@ -555,9 +557,9 @@ export class WSocketClient {
         }
     }
 
-    private _checkReconnect(state: number) {
+    private _checkReconnect(state: number,isReconnecting:boolean) {
         // autoReconnect模式，满足条件则自动重连
-        if (state === WSocketClient.CONNECTTED && this.config.autoReconnect && !this._isInReconnect) {
+        if (state === WSocketClient.CONNECTTED && this.config.autoReconnect && !isReconnecting) {
             // 从连接变成close状态，则开启断线重连
             this._isInReconnect = true;
             trace("onAutoReconnectStart")
@@ -580,13 +582,13 @@ export class WSocketClient {
             case "onclose": {
                 this._disconnect();
                 this.config.onDisconnect(isReconnecting ? 10 : 11, data);
-                this._checkReconnect(last)
+                this._checkReconnect(last,isReconnecting)
                 break;
             }
             case "onerror": {
                 this._disconnect();
                 this.config.onDisconnect(isReconnecting ? 10 : 12, data);
-                this._checkReconnect(last);
+                this._checkReconnect(last,isReconnecting);
                 break;
             }
             case "onopen": {
@@ -637,7 +639,7 @@ export class WSocketClient {
                     trace(` - Error: ${WSMessage.HEARTBEAT_TIMEOUT}`);
                     this._disconnect();
                     this.config.onDisconnect(3, "heartbeatTimeout");
-                    this._checkReconnect(state);
+                    this._checkReconnect(state,isReconnecting);
                 } else if ((nt - this._lastHeartbeatTime) > this.config.heartbeatInterval) {
                     // 心跳间隔，发送一个心跳
                     this._sendHeartbeat();
