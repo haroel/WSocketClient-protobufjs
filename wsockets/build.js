@@ -17,6 +17,12 @@ const wsocketClientPath = path.resolve(__dirname, 'WSocketClient.ts');
 const protobufSourcePath = path.resolve(__dirname, '_protobuf.min.js');
 const protobufTargetPath = path.join(npmPubSrcDir, 'protobuf.min.js');
 
+// CocosCreator assets 目录配置
+const assetsWsocketsDir = path.resolve(__dirname, '../assets/wsockets');
+const assetsJsFile = path.join(assetsWsocketsDir, 'WSocketClient.js');
+const assetsDtsFile = path.join(assetsWsocketsDir, 'WSocketClient.d.ts');
+const assetsProtobufFile = path.join(assetsWsocketsDir, 'protobuf.min.js');
+
 // 解析命令行参数和环境变量
 const args = process.argv.slice(2);
 // 默认生产模式（压缩），除非明确指定 --no-minify
@@ -24,6 +30,49 @@ const shouldMinify = !args.includes('--no-minify');
 
 // 确保输出目录存在
 fs.mkdirSync(outdir, { recursive: true });
+
+// 读取 WSMessage 常量定义并创建替换映射
+const wsDefineSourcePath = path.resolve(__dirname, 'WSocketDefine.ts');
+const wsMessageConstants = {};
+if (fs.existsSync(wsDefineSourcePath)) {
+    const wsDefineSource = fs.readFileSync(wsDefineSourcePath, 'utf8');
+    // 匹配 WSMessage 对象中的所有属性定义（属性名: 数字值）
+    const wsMessageRegex = /export const WSMessage\s*=\s*\{([\s\S]*?)\}/;
+    const wsMessageMatch = wsDefineSource.match(wsMessageRegex);
+    if (wsMessageMatch) {
+        const propertiesText = wsMessageMatch[1];
+        // 匹配每个属性：PROPERTY_NAME: 123456
+        const propertyRegex = /([A-Z_]+):\s*(\d+)/g;
+        let match;
+        while ((match = propertyRegex.exec(propertiesText)) !== null) {
+            wsMessageConstants[match[1]] = match[2];
+        }
+        console.log(`📋 Loaded ${Object.keys(wsMessageConstants).length} WSMessage constants for inline replacement`);
+    }
+}
+
+// esbuild 插件：将 WSMessage.XXX 替换为常量值
+const inlineWSMessagePlugin = {
+    name: 'inline-wsmessage',
+    setup(build) {
+        const filter = /\.ts$/;
+        build.onLoad({ filter }, async (args) => {
+            let source = await fs.promises.readFile(args.path, 'utf8');
+            
+            // 替换所有 WSMessage.CONSTANT_NAME 为实际的数字值
+            for (const [name, value] of Object.entries(wsMessageConstants)) {
+                // 使用正则替换，确保是完整的属性访问（避免误替换）
+                const regex = new RegExp(`WSMessage\\.${name}\\b`, 'g');
+                source = source.replace(regex, value);
+            }
+            
+            return {
+                contents: source,
+                loader: 'ts',
+            };
+        });
+    },
+};
 
 // 读取 WSocketClient.ts 中的 VERSION 并更新所有 package.json
 try {
@@ -69,6 +118,7 @@ const buildConfig = {
     target: 'es2015',
     format: 'iife',
     sourcemap: false,
+    plugins: [inlineWSMessagePlugin],
 };
 
 // 构建函数
@@ -217,6 +267,30 @@ export as namespace WSocketClient;
 
         fs.writeFileSync(dtsOutfile, finalDtsContent);
         console.log(`✅ Final declaration file created at ${dtsOutfile}`);
+
+        // 复制文件到 assets/wsockets 目录（用于 CocosCreator）
+        console.log('\n⏳ Copying files to assets/wsockets...');
+        try {
+            // 确保目标目录存在
+            fs.mkdirSync(assetsWsocketsDir, { recursive: true });
+            
+            // 复制 JS 文件
+            fs.copyFileSync(outfile, assetsJsFile);
+            const assetsJsStats = fs.statSync(assetsJsFile);
+            console.log(`✅ Copied to ${assetsJsFile} (${(assetsJsStats.size / 1024).toFixed(2)} KB)`);
+            
+            // 复制 d.ts 文件
+            fs.copyFileSync(dtsOutfile, assetsDtsFile);
+            console.log(`✅ Copied to ${assetsDtsFile}`);
+            
+            // 复制 protobuf.min.js 文件
+            if (fs.existsSync(protobufTargetPath)) {
+                fs.copyFileSync(protobufTargetPath, assetsProtobufFile);
+                console.log(`✅ Copied to ${assetsProtobufFile}`);
+            }
+        } catch (copyError) {
+            console.warn('⚠️  Failed to copy to assets directory:', copyError.message);
+        }
 
     } catch (error) {
         const errorMessage = error.stdout ? error.stdout.toString() : error.message;

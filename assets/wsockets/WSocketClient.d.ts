@@ -141,7 +141,7 @@ declare const WSMessage: {
 };
 declare class WSocketClient {
     /** WSocketClient 版本 */
-    static readonly VERSION = "1.4.5";
+    static readonly VERSION = "1.4.6";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -224,7 +224,7 @@ declare class WSocketClient {
         heartbeatInterval: number;
         /**
          * WS状态检测间隔时间（毫秒）
-         * @default 1000
+         * @default 500
          */
         tickInterval: number;
         /**
@@ -410,4 +410,21 @@ declare class WSocketClient {
      * @param callback 可选，要移除的特定回调函数。如果不传此参数，则删除该消息名称下的所有回调函数
      */
     offNTF(msgName: string, callback?: (msgName: string, playload: any) => void): void;
+    /**
+     * 处理接收到的数据
+     * @param data 接收到的数据
+     */
+    /**
+     * WS状态检测
+     */
+    /**
+     * 停止ticker检测
+     */
+    /**
+     * 发送心跳包
+     */
 }
+
+// 导出 WSocketClient 类
+export = WSocketClient;
+export as namespace WSocketClient;

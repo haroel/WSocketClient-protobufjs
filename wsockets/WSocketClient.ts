@@ -26,7 +26,7 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
 export class WSocketClient {
 
     /** WSocketClient 版本 */
-    public static readonly VERSION = '1.4.5';
+    public static readonly VERSION = '1.4.6';
 
     /******************** 状态定义 ********************/
     /**
@@ -106,9 +106,9 @@ export class WSocketClient {
 
         /**
          * WS状态检测间隔时间（毫秒）
-         * @default 1000
+         * @default 500
          */
-        tickInterval: 1000,
+        tickInterval: 500,
         /**
          * 自动断线重连，默认开启
          * 当连接意外断开时，是否自动尝试重新连接
@@ -607,9 +607,9 @@ export class WSocketClient {
      * WS状态检测
      */
     private _tick() {
+        const nt = Date.now();
         const protocolTimeout = this.config.protocolTimeout;
-        if (protocolTimeout > 0) {
-            let nt = Date.now();
+        if (protocolTimeout > 0 && this._listeners.size > 0) {
             for (let item of this._listeners.values()) {
                 if (!item.timeout && (nt - item.time) > protocolTimeout) {
                     item.timeout = true;
@@ -622,7 +622,7 @@ export class WSocketClient {
         let isReconnecting = this.isReconnecting;
         switch (state) {
             case WSocketClient.CONNECTING: {
-                if ((Date.now() - this._connectTime) > this.config.connectTimeout) {
+                if ((nt - this._connectTime) > this.config.connectTimeout) {
                     // 连接超时
                     trace(` - Error: ${WSMessage.CONNECT_TIMEOUT}`);
                     this._disconnect();
@@ -631,7 +631,6 @@ export class WSocketClient {
                 break;
             }
             case WSocketClient.CONNECTTED: {
-                const nt = Date.now();
                 if ((nt - this._lastHeartbeatResponseTime) > this.config.heartbeatTimeout) {
                     // 心跳响应超时
                     trace(` - Error: ${WSMessage.HEARTBEAT_TIMEOUT}`);

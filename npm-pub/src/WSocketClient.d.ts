@@ -141,7 +141,7 @@ declare const WSMessage: {
 };
 declare class WSocketClient {
     /** WSocketClient 版本 */
-    static readonly VERSION = "1.4.5";
+    static readonly VERSION = "1.4.6";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -224,7 +224,7 @@ declare class WSocketClient {
         heartbeatInterval: number;
         /**
          * WS状态检测间隔时间（毫秒）
-         * @default 1000
+         * @default 500
          */
         tickInterval: number;
         /**
