@@ -1,6 +1,6 @@
 {
   "name": "@frw/wsocket-client",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "WebSocket客户端库，支持Protobuf协议",
   "_url": "https://npm.wedobest.com.cn/-/web/detail/@frw/wsocket-client",
   "main": "index.js",

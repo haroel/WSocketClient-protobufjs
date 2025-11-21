@@ -26,7 +26,7 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
 export class WSocketClient {
 
     /** WSocketClient 版本 */
-    public static readonly VERSION = '1.4.6';
+    public static readonly VERSION = '1.4.7';
 
     /******************** 状态定义 ********************/
     /**

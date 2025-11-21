@@ -141,7 +141,7 @@ declare const WSMessage: {
 };
 declare class WSocketClient {
     /** WSocketClient 版本 */
-    static readonly VERSION = "1.4.6";
+    static readonly VERSION = "1.4.7";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -424,7 +424,3 @@ declare class WSocketClient {
      * 发送心跳包
      */
 }
-
-// 导出 WSocketClient 类
-export = WSocketClient;
-export as namespace WSocketClient;

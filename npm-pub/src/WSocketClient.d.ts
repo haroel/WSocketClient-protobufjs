@@ -141,7 +141,7 @@ declare const WSMessage: {
 };
 declare class WSocketClient {
     /** WSocketClient 版本 */
-    static readonly VERSION = "1.4.6";
+    static readonly VERSION = "1.4.7";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
