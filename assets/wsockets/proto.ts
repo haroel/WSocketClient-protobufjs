@@ -1,11 +1,11 @@
 
 /** 
  * 注意：该脚本由 proto-tools/convert 工具生成，请勿手动修改！
- * 生成时间: 2025-11-14 17:13:37 
+ * 生成时间: 2025-11-21 14:28:44 
  * 工具版本: v1.1 **/
 
 const proto_define = {
-  package: "game.protobuf",
+  package: "GameFramework.Protobuf",
   messages: [
     {
       name: "ExternalMessage",

@@ -1,5 +1,5 @@
 syntax = "proto3";
-package game.protobuf;
+package GameFramework.Protobuf;
 
 option java_package = "com.game.protobuf";
 option csharp_namespace = "GameFramework.Protobuf";

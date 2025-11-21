@@ -207,31 +207,50 @@ function getTimestamp() {
 function convertReflectionToDefinition(reflectionJson) {
     let packageName = '';
     let mainNamespace = null;
+    const packageNames = new Set();
 
-    // 递归查找包含消息/枚举定义的第一个命名空间
-    function findMainNamespace(node, currentPath) {
-        if (mainNamespace) return; // 找到后停止
-
+    // 递归查找所有包含消息/枚举定义的命名空间
+    function findPackageNames(node, currentPath) {
         const children = node.nested || {};
-        const hasDefinitions = Object.values(children).some(child => child && (child.fields || child.values));
+        
+        // 当前节点是否是一个纯粹的 Namespace（不是 Message/Enum）
+        // 避免把 Message 内部的 Nested Message 误判为新包
+        const isNamespace = !node.fields && !node.values;
+        
+        // 检查当前节点是否直接包含 Message 或 Enum
+        const hasDirectDefinitions = isNamespace && Object.values(children).some(child => child && (child.fields || child.values));
 
-        if (hasDefinitions) {
-            packageName = currentPath.join('.');
-            mainNamespace = node;
-        } else {
-            for (const key in children) {
-                if (children[key] && children[key].nested) {
-                    findMainNamespace(children[key], [...currentPath, key]);
-                }
+        if (hasDirectDefinitions) {
+            const pkgName = currentPath.join('.');
+            packageNames.add(pkgName);
+            // 记录第一个找到的 namespace 用于后续生成代码（假设包名一致时，这就足够了）
+            if (!mainNamespace) {
+                mainNamespace = node;
+            }
+        }
+        
+        // 继续递归查找子节点
+        // 只递归那些本身不是 Message/Enum 的节点
+        for (const key in children) {
+            const child = children[key];
+            if (child && child.nested && !child.fields && !child.values) {
+                findPackageNames(child, [...currentPath, key]);
             }
         }
     }
 
-    findMainNamespace(reflectionJson, []);
+    findPackageNames(reflectionJson, []);
 
-    if (!mainNamespace) {
+    if (packageNames.size === 0) {
         throw new Error("在反射JSON中找不到包含消息/枚举定义的命名空间。");
     }
+
+    if (packageNames.size > 1) {
+        const packages = Array.from(packageNames).join(', ');
+        throw new Error(`检测到多个不一致的包名 (Package Names): [${packages}]。\n请检查所有 .proto 文件的 package 声明是否一致。`);
+    }
+
+    packageName = Array.from(packageNames)[0];
 
     const definition = {
         package: packageName,
