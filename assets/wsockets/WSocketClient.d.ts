@@ -141,7 +141,7 @@ declare const WSMessage: {
 };
 declare class WSocketClient {
     /** WSocketClient 版本 */
-    static readonly VERSION = "1.4.7";
+    static readonly VERSION = "1.4.8";
     /******************** 状态定义 ********************/
     /**
      * 初始状态
@@ -334,6 +334,13 @@ declare class WSocketClient {
      * @returns 服务器当前时间的毫秒时间戳
      */
     get serverTime(): number;
+    /**
+     * 是否为Long（64位）类型
+     * 调用val.toNumber()将自动转换为number类型
+     * @param val
+     * @returns
+     */
+    isLong(val: any): any;
     /**
      * 重置所有状态和数据
      * 关闭连接、清空所有回调、停止定时器、重置所有内部状态

@@ -2282,6 +2282,10 @@ function __ByteBuffer(Long) {
                 lo += this.view[offset] << 24 >>> 0;
             }
             var value = new Long(lo, hi, false);
+            // 判断value是否在js的number范围内
+            if (value < Number.MIN_SAFE_INTEGER || value > Number.MAX_SAFE_INTEGER) {
+                value = value.toNumber();
+            }
             if (relative) this.offset += 8;
             return value;
         };
@@ -2403,6 +2407,9 @@ function __ByteBuffer(Long) {
                 lo += this.view[offset] << 24 >>> 0;
             }
             var value = new Long(lo, hi, true);
+            if (value > Number.MIN_SAFE_INTEGER && value < Number.MAX_SAFE_INTEGER) {
+                value = value.toNumber();
+            }
             if (relative) this.offset += 8;
             return value;
         };
@@ -5066,7 +5073,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
         "fixed64": {
             name: "fixed64",
             wireType: ProtoBuf.WIRE_TYPES.BITS64,
-            defaultValue: ProtoBuf.Long ? ProtoBuf.Long.UZERO : undefined
+            defaultValue:  ProtoBuf.Long ? ProtoBuf.Long.UZERO : undefined
         },
         "sfixed64": {
             name: "sfixed64",
@@ -5161,7 +5168,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
      * @alias ProtoBuf.Util
      * @expose
      */
-    ProtoBuf.Util = (function () {
+    ProtoBuf.Util = (function() {
         "use strict";
 
         /**
@@ -5178,9 +5185,19 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @expose
          */
         Util.IS_NODE = !!(
-            typeof process === 'object' && process + '' === '[object process]' && !process['browser']
+            typeof process === 'object' && process+'' === '[object process]' && !process['browser']
         );
 
+        /**
+         * Constructs a XMLHttpRequest object.
+         * @return {XMLHttpRequest}
+         * @throws {Error} If XMLHttpRequest is not supported
+         * @expose
+         */
+        Util.XHR = function() {
+            // No dependencies please, ref: http://www.quirksmode.org/js/xmlhttp.html
+        throw new Error("XMLHttpRequest is not supported");
+        };
 
         /**
          * Fetches a resource.
@@ -5190,7 +5207,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @return {?string|undefined} Resource contents if callback is omitted (null if the request failed), else undefined.
          * @expose
          */
-        Util.fetch = function (path, callback) {
+        Util.fetch = function(path, callback) {
 
         };
 
@@ -5200,7 +5217,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {string}
          * @expose
          */
-        Util.toCamelCase = function (str) {
+        Util.toCamelCase = function(str) {
             return str.replace(/_([a-zA-Z])/g, function ($0, $1) {
                 return $1.toUpperCase();
             });
@@ -5274,12 +5291,924 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
         STRING_SQ: /(?:'([^'\\]*(?:\\.[^'\\]*)*)')/g
     };
 
+    /**
+     * @alias ProtoBuf.DotProto
+     * @expose
+     */
+    ProtoBuf.DotProto = (function(ProtoBuf, Lang) {
+        "use strict";
+
+        /**
+         * Utilities to parse .proto files.
+         * @exports ProtoBuf.DotProto
+         * @namespace
+         */
+        var DotProto = {};
+
+        /**
+         * Constructs a new Tokenizer.
+         * @exports ProtoBuf.DotProto.Tokenizer
+         * @class prototype tokenizer
+         * @param {string} proto Proto to tokenize
+         * @constructor
+         */
+        var Tokenizer = function(proto) {
+
+            /**
+             * Source to parse.
+             * @type {string}
+             * @expose
+             */
+            this.source = proto+"";
+
+            /**
+             * Current index.
+             * @type {number}
+             * @expose
+             */
+            this.index = 0;
+
+            /**
+             * Current line.
+             * @type {number}
+             * @expose
+             */
+            this.line = 1;
+
+            /**
+             * Token stack.
+             * @type {!Array.<string>}
+             * @expose
+             */
+            this.stack = [];
+
+            /**
+             * Opening character of the current string read, if any.
+             * @type {?string}
+             * @private
+             */
+            this._stringOpen = null;
+        };
+
+        /**
+         * @alias ProtoBuf.DotProto.Tokenizer.prototype
+         * @inner
+         */
+        var TokenizerPrototype = Tokenizer.prototype;
+
+        /**
+         * Reads a string beginning at the current index.
+         * @return {string}
+         * @private
+         */
+        TokenizerPrototype._readString = function() {
+            var re = this._stringOpen === '"'
+                ? Lang.STRING_DQ
+                : Lang.STRING_SQ;
+            re.lastIndex = this.index - 1; // Include the open quote
+            var match = re.exec(this.source);
+            if (!match)
+                throw Error("unterminated string");
+            this.index = re.lastIndex;
+            this.stack.push(this._stringOpen);
+            this._stringOpen = null;
+            return match[1];
+        };
+
+        /**
+         * Gets the next token and advances by one.
+         * @return {?string} Token or `null` on EOF
+         * @expose
+         */
+        TokenizerPrototype.next = function() {
+            if (this.stack.length > 0)
+                return this.stack.shift();
+            if (this.index >= this.source.length)
+                return null;
+            if (this._stringOpen !== null)
+                return this._readString();
+
+            var repeat,
+                prev,
+                next;
+            do {
+                repeat = false;
+
+                // Strip white spaces
+                while (Lang.WHITESPACE.test(next = this.source.charAt(this.index))) {
+                    if (next === '\n')
+                        ++this.line;
+                    if (++this.index === this.source.length)
+                        return null;
+                }
+
+                // Strip comments
+                if (this.source.charAt(this.index) === '/') {
+                    ++this.index;
+                    if (this.source.charAt(this.index) === '/') { // Line
+                        while (this.source.charAt(++this.index) !== '\n')
+                            if (this.index == this.source.length)
+                                return null;
+                        ++this.index;
+                        ++this.line;
+                        repeat = true;
+                    } else if ((next = this.source.charAt(this.index)) === '*') { /* Block */
+                        do {
+                            if (next === '\n')
+                                ++this.line;
+                            if (++this.index === this.source.length)
+                                return null;
+                            prev = next;
+                            next = this.source.charAt(this.index);
+                        } while (prev !== '*' || next !== '/');
+                        ++this.index;
+                        repeat = true;
+                    } else
+                        return '/';
+                }
+            } while (repeat);
+
+            if (this.index === this.source.length)
+                return null;
+
+            // Read the next token
+            var end = this.index;
+            Lang.DELIM.lastIndex = 0;
+            var delim = Lang.DELIM.test(this.source.charAt(end++));
+            if (!delim)
+                while(end < this.source.length && !Lang.DELIM.test(this.source.charAt(end)))
+                    ++end;
+            var token = this.source.substring(this.index, this.index = end);
+            if (token === '"' || token === "'")
+                this._stringOpen = token;
+            return token;
+        };
+
+        /**
+         * Peeks for the next token.
+         * @return {?string} Token or `null` on EOF
+         * @expose
+         */
+        TokenizerPrototype.peek = function() {
+            if (this.stack.length === 0) {
+                var token = this.next();
+                if (token === null)
+                    return null;
+                this.stack.push(token);
+            }
+            return this.stack[0];
+        };
+
+        /**
+         * Skips a specific token and throws if it differs.
+         * @param {string} expected Expected token
+         * @throws {Error} If the actual token differs
+         */
+        TokenizerPrototype.skip = function(expected) {
+            var actual = this.next();
+            if (actual !== expected)
+                throw Error("illegal '"+actual+"', '"+expected+"' expected");
+        };
+
+        /**
+         * Omits an optional token.
+         * @param {string} expected Expected optional token
+         * @returns {boolean} `true` if the token exists
+         */
+        TokenizerPrototype.omit = function(expected) {
+            if (this.peek() === expected) {
+                this.next();
+                return true;
+            }
+            return false;
+        };
+
+        /**
+         * Returns a string representation of this object.
+         * @return {string} String representation as of "Tokenizer(index/length)"
+         * @expose
+         */
+        TokenizerPrototype.toString = function() {
+            return "Tokenizer ("+this.index+"/"+this.source.length+" at line "+this.line+")";
+        };
+
+        /**
+         * @alias ProtoBuf.DotProto.Tokenizer
+         * @expose
+         */
+        DotProto.Tokenizer = Tokenizer;
+
+        /**
+         * Constructs a new Parser.
+         * @exports ProtoBuf.DotProto.Parser
+         * @class prototype parser
+         * @param {string} source Source
+         * @constructor
+         */
+        var Parser = function(source) {
+
+            /**
+             * Tokenizer.
+             * @type {!ProtoBuf.DotProto.Tokenizer}
+             * @expose
+             */
+            this.tn = new Tokenizer(source);
+
+            /**
+             * Whether parsing proto3 or not.
+             * @type {boolean}
+             */
+            this.proto3 = false;
+        };
+
+        /**
+         * @alias ProtoBuf.DotProto.Parser.prototype
+         * @inner
+         */
+        var ParserPrototype = Parser.prototype;
+
+        /**
+         * Parses the source.
+         * @returns {!Object}
+         * @throws {Error} If the source cannot be parsed
+         * @expose
+         */
+        ParserPrototype.parse = function() {
+            var topLevel = {
+                "name": "[ROOT]", // temporary
+                "package": null,
+                "messages": [],
+                "enums": [],
+                "imports": [],
+                "options": {},
+                "services": []
+                // "syntax": undefined
+            };
+            var token,
+                head = true,
+                weak;
+            try {
+                while (token = this.tn.next()) {
+                    switch (token) {
+                        case 'package':
+                            if (!head || topLevel["package"] !== null)
+                                throw Error("unexpected 'package'");
+                            token = this.tn.next();
+                            if (!Lang.TYPEREF.test(token))
+                                throw Error("illegal package name: " + token);
+                            this.tn.skip(";");
+                            topLevel["package"] = token;
+                            break;
+                        case 'import':
+                            if (!head)
+                                throw Error("unexpected 'import'");
+                            token = this.tn.peek();
+                            if (token === "public" || (weak = token === "weak")) // token ignored
+                                this.tn.next();
+                            token = this._readString();
+                            this.tn.skip(";");
+                            if (!weak) // import ignored
+                                topLevel["imports"].push(token);
+                            break;
+                        case 'syntax':
+                            if (!head)
+                                throw Error("unexpected 'syntax'");
+                            this.tn.skip("=");
+                            if ((topLevel["syntax"] = this._readString()) === "proto3")
+                                this.proto3 = true;
+                            this.tn.skip(";");
+                            break;
+                        case 'message':
+                            this._parseMessage(topLevel, null);
+                            head = false;
+                            break;
+                        case 'enum':
+                            this._parseEnum(topLevel);
+                            head = false;
+                            break;
+                        case 'option':
+                            this._parseOption(topLevel);
+                            break;
+                        case 'service':
+                            this._parseService(topLevel);
+                            break;
+                        case 'extend':
+                            this._parseExtend(topLevel);
+                            break;
+                        default:
+                            throw Error("unexpected '" + token + "'");
+                    }
+                }
+            } catch (e) {
+                e.message = "Parse error at line "+this.tn.line+": " + e.message;
+                throw e;
+            }
+            delete topLevel["name"];
+            return topLevel;
+        };
+
+        /**
+         * Parses the specified source.
+         * @returns {!Object}
+         * @throws {Error} If the source cannot be parsed
+         * @expose
+         */
+        Parser.parse = function(source) {
+            return new Parser(source).parse();
+        };
+
+        // ----- Conversion ------
+
+        /**
+         * Converts a numerical string to an id.
+         * @param {string} value
+         * @param {boolean=} mayBeNegative
+         * @returns {number}
+         * @inner
+         */
+        function mkId(value, mayBeNegative) {
+            var id = -1,
+                sign = 1;
+            if (value.charAt(0) == '-') {
+                sign = -1;
+                value = value.substring(1);
+            }
+            if (Lang.NUMBER_DEC.test(value))
+                id = parseInt(value);
+            else if (Lang.NUMBER_HEX.test(value))
+                id = parseInt(value.substring(2), 16);
+            else if (Lang.NUMBER_OCT.test(value))
+                id = parseInt(value.substring(1), 8);
+            else
+                throw Error("illegal id value: " + (sign < 0 ? '-' : '') + value);
+            id = (sign*id)|0; // Force to 32bit
+            if (!mayBeNegative && id < 0)
+                throw Error("illegal id value: " + (sign < 0 ? '-' : '') + value);
+            return id;
+        }
+
+        /**
+         * Converts a numerical string to a number.
+         * @param {string} val
+         * @returns {number}
+         * @inner
+         */
+        function mkNumber(val) {
+            var sign = 1;
+            if (val.charAt(0) == '-') {
+                sign = -1;
+                val = val.substring(1);
+            }
+            if (Lang.NUMBER_DEC.test(val))
+                return sign * parseInt(val, 10);
+            else if (Lang.NUMBER_HEX.test(val))
+                return sign * parseInt(val.substring(2), 16);
+            else if (Lang.NUMBER_OCT.test(val))
+                return sign * parseInt(val.substring(1), 8);
+            else if (val === 'inf')
+                return sign * Infinity;
+            else if (val === 'nan')
+                return NaN;
+            else if (Lang.NUMBER_FLT.test(val))
+                return sign * parseFloat(val);
+            throw Error("illegal number value: " + (sign < 0 ? '-' : '') + val);
+        }
+
+        // ----- Reading ------
+
+        /**
+         * Reads a string.
+         * @returns {string}
+         * @private
+         */
+        ParserPrototype._readString = function() {
+            var value = "",
+                token,
+                delim;
+            do {
+                delim = this.tn.next();
+                if (delim !== "'" && delim !== '"')
+                    throw Error("illegal string delimiter: "+delim);
+                value += this.tn.next();
+                this.tn.skip(delim);
+                token = this.tn.peek();
+            } while (token === '"' || token === '"'); // multi line?
+            return value;
+        };
+
+        /**
+         * Reads a value.
+         * @param {boolean=} mayBeTypeRef
+         * @returns {number|boolean|string}
+         * @private
+         */
+        ParserPrototype._readValue = function(mayBeTypeRef) {
+            var token = this.tn.peek(),
+                value;
+            if (token === '"' || token === "'")
+                return this._readString();
+            this.tn.next();
+            if (Lang.NUMBER.test(token))
+                return mkNumber(token);
+            if (Lang.BOOL.test(token))
+                return (token.toLowerCase() === 'true');
+            if (mayBeTypeRef && Lang.TYPEREF.test(token))
+                return token;
+            throw Error("illegal value: "+token);
+
+        };
+
+        // ----- Parsing constructs -----
+
+        /**
+         * Parses a namespace option.
+         * @param {!Object} parent Parent definition
+         * @param {boolean=} isList
+         * @private
+         */
+        ParserPrototype._parseOption = function(parent, isList) {
+            var token = this.tn.next(),
+                custom = false;
+            if (token === '(') {
+                custom = true;
+                token = this.tn.next();
+            }
+            if (!Lang.TYPEREF.test(token))
+                // we can allow options of the form google.protobuf.* since they will just get ignored anyways
+                // if (!/google\.protobuf\./.test(token)) // FIXME: Why should that not be a valid typeref?
+                    throw Error("illegal option name: "+token);
+            var name = token;
+            if (custom) { // (my_method_option).foo, (my_method_option), some_method_option, (foo.my_option).bar
+                this.tn.skip(')');
+                name = '('+name+')';
+                token = this.tn.peek();
+                if (Lang.FQTYPEREF.test(token)) {
+                    name += token;
+                    this.tn.next();
+                }
+            }
+            this.tn.skip('=');
+            this._parseOptionValue(parent, name);
+            if (!isList)
+                this.tn.skip(";");
+        };
+
+        /**
+         * Sets an option on the specified options object.
+         * @param {!Object.<string,*>} options
+         * @param {string} name
+         * @param {string|number|boolean} value
+         * @inner
+         */
+        function setOption(options, name, value) {
+            if (typeof options[name] === 'undefined')
+                options[name] = value;
+            else {
+                if (!Array.isArray(options[name]))
+                    options[name] = [ options[name] ];
+                options[name].push(value);
+            }
+        }
+
+        /**
+         * Parses an option value.
+         * @param {!Object} parent
+         * @param {string} name
+         * @private
+         */
+        ParserPrototype._parseOptionValue = function(parent, name) {
+            var token = this.tn.peek();
+            if (token !== '{') { // Plain value
+                setOption(parent["options"], name, this._readValue(true));
+            } else { // Aggregate options
+                this.tn.skip("{");
+                while ((token = this.tn.next()) !== '}') {
+                    if (!Lang.NAME.test(token))
+                        throw Error("illegal option name: " + name + "." + token);
+                    if (this.tn.omit(":"))
+                        setOption(parent["options"], name + "." + token, this._readValue(true));
+                    else
+                        this._parseOptionValue(parent, name + "." + token);
+                }
+            }
+        };
+
+        /**
+         * Parses a service definition.
+         * @param {!Object} parent Parent definition
+         * @private
+         */
+        ParserPrototype._parseService = function(parent) {
+            var token = this.tn.next();
+            if (!Lang.NAME.test(token))
+                throw Error("illegal service name at line "+this.tn.line+": "+token);
+            var name = token;
+            var svc = {
+                "name": name,
+                "rpc": {},
+                "options": {}
+            };
+            this.tn.skip("{");
+            while ((token = this.tn.next()) !== '}') {
+                if (token === "option")
+                    this._parseOption(svc);
+                else if (token === 'rpc')
+                    this._parseServiceRPC(svc);
+                else
+                    throw Error("illegal service token: "+token);
+            }
+            this.tn.omit(";");
+            parent["services"].push(svc);
+        };
+
+        /**
+         * Parses a RPC service definition of the form ['rpc', name, (request), 'returns', (response)].
+         * @param {!Object} svc Service definition
+         * @private
+         */
+        ParserPrototype._parseServiceRPC = function(svc) {
+            var type = "rpc",
+                token = this.tn.next();
+            if (!Lang.NAME.test(token))
+                throw Error("illegal rpc service method name: "+token);
+            var name = token;
+            var method = {
+                "request": null,
+                "response": null,
+                "request_stream": false,
+                "response_stream": false,
+                "options": {}
+            };
+            this.tn.skip("(");
+            token = this.tn.next();
+            if (token.toLowerCase() === "stream") {
+              method["request_stream"] = true;
+              token = this.tn.next();
+            }
+            if (!Lang.TYPEREF.test(token))
+                throw Error("illegal rpc service request type: "+token);
+            method["request"] = token;
+            this.tn.skip(")");
+            token = this.tn.next();
+            if (token.toLowerCase() !== "returns")
+                throw Error("illegal rpc service request type delimiter: "+token);
+            this.tn.skip("(");
+            token = this.tn.next();
+            if (token.toLowerCase() === "stream") {
+              method["response_stream"] = true;
+              token = this.tn.next();
+            }
+            method["response"] = token;
+            this.tn.skip(")");
+            token = this.tn.peek();
+            if (token === '{') {
+                this.tn.next();
+                while ((token = this.tn.next()) !== '}') {
+                    if (token === 'option')
+                        this._parseOption(method);
+                    else
+                        throw Error("illegal rpc service token: " + token);
+                }
+                this.tn.omit(";");
+            } else
+                this.tn.skip(";");
+            if (typeof svc[type] === 'undefined')
+                svc[type] = {};
+            svc[type][name] = method;
+        };
+
+        /**
+         * Parses a message definition.
+         * @param {!Object} parent Parent definition
+         * @param {!Object=} fld Field definition if this is a group
+         * @returns {!Object}
+         * @private
+         */
+        ParserPrototype._parseMessage = function(parent, fld) {
+            var isGroup = !!fld,
+                token = this.tn.next();
+            var msg = {
+                "name": "",
+                "fields": [],
+                "enums": [],
+                "messages": [],
+                "options": {},
+                "services": [],
+                "oneofs": {}
+                // "extensions": undefined
+            };
+            if (!Lang.NAME.test(token))
+                throw Error("illegal "+(isGroup ? "group" : "message")+" name: "+token);
+            msg["name"] = token;
+            if (isGroup) {
+                this.tn.skip("=");
+                fld["id"] = mkId(this.tn.next());
+                msg["isGroup"] = true;
+            }
+            token = this.tn.peek();
+            if (token === '[' && fld)
+                this._parseFieldOptions(fld);
+            this.tn.skip("{");
+            while ((token = this.tn.next()) !== '}') {
+                if (Lang.RULE.test(token))
+                    this._parseMessageField(msg, token);
+                else if (token === "oneof")
+                    this._parseMessageOneOf(msg);
+                else if (token === "enum")
+                    this._parseEnum(msg);
+                else if (token === "message")
+                    this._parseMessage(msg);
+                else if (token === "option")
+                    this._parseOption(msg);
+                else if (token === "service")
+                    this._parseService(msg);
+                else if (token === "extensions")
+                    if (msg.hasOwnProperty("extensions")) {
+                        msg["extensions"] = msg["extensions"].concat(this._parseExtensionRanges())
+                    } else {
+                        msg["extensions"] = this._parseExtensionRanges();
+                    }
+                else if (token === "reserved")
+                    this._parseIgnored(); // TODO
+                else if (token === "extend")
+                    this._parseExtend(msg);
+                else if (Lang.TYPEREF.test(token)) {
+                    if (!this.proto3)
+                        throw Error("illegal field rule: "+token);
+                    this._parseMessageField(msg, "optional", token);
+                } else
+                    throw Error("illegal message token: "+token);
+            }
+            this.tn.omit(";");
+            parent["messages"].push(msg);
+            return msg;
+        };
+
+        /**
+         * Parses an ignored statement.
+         * @private
+         */
+        ParserPrototype._parseIgnored = function() {
+            while (this.tn.peek() !== ';')
+                this.tn.next();
+            this.tn.skip(";");
+        };
+
+        /**
+         * Parses a message field.
+         * @param {!Object} msg Message definition
+         * @param {string} rule Field rule
+         * @param {string=} type Field type if already known (never known for maps)
+         * @returns {!Object} Field descriptor
+         * @private
+         */
+        ParserPrototype._parseMessageField = function(msg, rule, type) {
+            if (!Lang.RULE.test(rule))
+                throw Error("illegal message field rule: "+rule);
+            var fld = {
+                "rule": rule,
+                "type": "",
+                "name": "",
+                "options": {},
+                "id": 0
+            };
+            var token;
+            if (rule === "map") {
+
+                if (type)
+                    throw Error("illegal type: " + type);
+                this.tn.skip('<');
+                token = this.tn.next();
+                if (!Lang.TYPE.test(token) && !Lang.TYPEREF.test(token))
+                    throw Error("illegal message field type: " + token);
+                fld["keytype"] = token;
+                this.tn.skip(',');
+                token = this.tn.next();
+                if (!Lang.TYPE.test(token) && !Lang.TYPEREF.test(token))
+                    throw Error("illegal message field: " + token);
+                fld["type"] = token;
+                this.tn.skip('>');
+                token = this.tn.next();
+                if (!Lang.NAME.test(token))
+                    throw Error("illegal message field name: " + token);
+                fld["name"] = token;
+                this.tn.skip("=");
+                fld["id"] = mkId(this.tn.next());
+                token = this.tn.peek();
+                if (token === '[')
+                    this._parseFieldOptions(fld);
+                this.tn.skip(";");
+
+            } else {
+
+                type = typeof type !== 'undefined' ? type : this.tn.next();
+
+                if (type === "group") {
+
+                    // "A [legacy] group simply combines a nested message type and a field into a single declaration. In your
+                    // code, you can treat this message just as if it had a Result type field called result (the latter name is
+                    // converted to lower-case so that it does not conflict with the former)."
+                    var grp = this._parseMessage(msg, fld);
+                    if (!/^[A-Z]/.test(grp["name"]))
+                        throw Error('illegal group name: '+grp["name"]);
+                    fld["type"] = grp["name"];
+                    fld["name"] = grp["name"].toLowerCase();
+                    this.tn.omit(";");
+
+                } else {
+
+                    if (!Lang.TYPE.test(type) && !Lang.TYPEREF.test(type))
+                        throw Error("illegal message field type: " + type);
+                    fld["type"] = type;
+                    token = this.tn.next();
+                    if (!Lang.NAME.test(token))
+                        throw Error("illegal message field name: " + token);
+                    fld["name"] = token;
+                    this.tn.skip("=");
+                    fld["id"] = mkId(this.tn.next());
+                    token = this.tn.peek();
+                    if (token === "[")
+                        this._parseFieldOptions(fld);
+                    this.tn.skip(";");
+
+                }
+            }
+            msg["fields"].push(fld);
+            return fld;
+        };
+
+        /**
+         * Parses a message oneof.
+         * @param {!Object} msg Message definition
+         * @private
+         */
+        ParserPrototype._parseMessageOneOf = function(msg) {
+            var token = this.tn.next();
+            if (!Lang.NAME.test(token))
+                throw Error("illegal oneof name: "+token);
+            var name = token,
+                fld;
+            var fields = [];
+            this.tn.skip("{");
+            while ((token = this.tn.next()) !== "}") {
+                fld = this._parseMessageField(msg, "optional", token);
+                fld["oneof"] = name;
+                fields.push(fld["id"]);
+            }
+            this.tn.omit(";");
+            msg["oneofs"][name] = fields;
+        };
+
+        /**
+         * Parses a set of field option definitions.
+         * @param {!Object} fld Field definition
+         * @private
+         */
+        ParserPrototype._parseFieldOptions = function(fld) {
+            this.tn.skip("[");
+            var token,
+                first = true;
+            while ((token = this.tn.peek()) !== ']') {
+                if (!first)
+                    this.tn.skip(",");
+                this._parseOption(fld, true);
+                first = false;
+            }
+            this.tn.next();
+        };
+
+        /**
+         * Parses an enum.
+         * @param {!Object} msg Message definition
+         * @private
+         */
+        ParserPrototype._parseEnum = function(msg) {
+            var enm = {
+                "name": "",
+                "values": [],
+                "options": {}
+            };
+            var token = this.tn.next();
+            if (!Lang.NAME.test(token))
+                throw Error("illegal name: "+token);
+            enm["name"] = token;
+            this.tn.skip("{");
+            while ((token = this.tn.next()) !== '}') {
+                if (token === "option")
+                    this._parseOption(enm);
+                else {
+                    if (!Lang.NAME.test(token))
+                        throw Error("illegal name: "+token);
+                    this.tn.skip("=");
+                    var val = {
+                        "name": token,
+                        "id": mkId(this.tn.next(), true)
+                    };
+                    token = this.tn.peek();
+                    if (token === "[")
+                        this._parseFieldOptions({ "options": {} });
+                    this.tn.skip(";");
+                    enm["values"].push(val);
+                }
+            }
+            this.tn.omit(";");
+            msg["enums"].push(enm);
+        };
+
+        /**
+         * Parses extension / reserved ranges.
+         * @returns {!Array.<!Array.<number>>}
+         * @private
+         */
+        ParserPrototype._parseExtensionRanges = function() {
+            var ranges = [];
+            var token,
+                range,
+                value;
+            do {
+                range = [];
+                while (true) {
+                    token = this.tn.next();
+                    switch (token) {
+                        case "min":
+                            value = ProtoBuf.ID_MIN;
+                            break;
+                        case "max":
+                            value = ProtoBuf.ID_MAX;
+                            break;
+                        default:
+                            value = mkNumber(token);
+                            break;
+                    }
+                    range.push(value);
+                    if (range.length === 2)
+                        break;
+                    if (this.tn.peek() !== "to") {
+                        range.push(value);
+                        break;
+                    }
+                    this.tn.next();
+                }
+                ranges.push(range);
+            } while (this.tn.omit(","));
+            this.tn.skip(";");
+            return ranges;
+        };
+
+        /**
+         * Parses an extend block.
+         * @param {!Object} parent Parent object
+         * @private
+         */
+        ParserPrototype._parseExtend = function(parent) {
+            var token = this.tn.next();
+            if (!Lang.TYPEREF.test(token))
+                throw Error("illegal extend reference: "+token);
+            var ext = {
+                "ref": token,
+                "fields": []
+            };
+            this.tn.skip("{");
+            while ((token = this.tn.next()) !== '}') {
+                if (Lang.RULE.test(token))
+                    this._parseMessageField(ext, token);
+                else if (Lang.TYPEREF.test(token)) {
+                    if (!this.proto3)
+                        throw Error("illegal field rule: "+token);
+                    this._parseMessageField(ext, "optional", token);
+                } else
+                    throw Error("illegal extend token: "+token);
+            }
+            this.tn.omit(";");
+            parent["messages"].push(ext);
+            return ext;
+        };
+
+        // ----- General -----
+
+        /**
+         * Returns a string representation of this parser.
+         * @returns {string}
+         */
+        ParserPrototype.toString = function() {
+            return "Parser at line "+this.tn.line;
+        };
+
+        /**
+         * @alias ProtoBuf.DotProto.Parser
+         * @expose
+         */
+        DotProto.Parser = Parser;
+
+        return DotProto;
+
+    })(ProtoBuf, ProtoBuf.Lang);
 
     /**
      * @alias ProtoBuf.Reflect
      * @expose
      */
-    ProtoBuf.Reflect = (function (ProtoBuf) {
+    ProtoBuf.Reflect = (function(ProtoBuf) {
         "use strict";
 
         /**
@@ -5298,7 +6227,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {?ProtoBuf.Reflect.T} parent Parent object
          * @param {string} name Object name
          */
-        var T = function (builder, parent, name) {
+        var T = function(builder, parent, name) {
 
             /**
              * Builder reference.
@@ -5340,14 +6269,14 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {string} Fully qualified name as of ".PATH.TO.THIS"
          * @expose
          */
-        TPrototype.fqn = function () {
+        TPrototype.fqn = function() {
             var name = this.name,
                 ptr = this;
             do {
                 ptr = ptr.parent;
                 if (ptr == null)
                     break;
-                name = ptr.name + "." + name;
+                name = ptr.name+"."+name;
             } while (true);
             return name;
         };
@@ -5358,7 +6287,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @return String representation
          * @expose
          */
-        TPrototype.toString = function (includeClass) {
+        TPrototype.toString = function(includeClass) {
             return (includeClass ? this.className + " " : "") + this.fqn();
         };
 
@@ -5367,8 +6296,8 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If this type cannot be built directly
          * @expose
          */
-        TPrototype.build = function () {
-            throw Error(this.toString(true));
+        TPrototype.build = function() {
+            throw Error(this.toString(true)+" cannot be built directly");
         };
 
         /**
@@ -5388,7 +6317,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @constructor
          * @extends ProtoBuf.Reflect.T
          */
-        var Namespace = function (builder, parent, name, options, syntax) {
+        var Namespace = function(builder, parent, name, options, syntax) {
             T.call(this, builder, parent, name);
 
             /**
@@ -5427,12 +6356,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @return {Array.<ProtoBuf.Reflect.T>}
          * @expose
          */
-        NamespacePrototype.getChildren = function (type) {
+        NamespacePrototype.getChildren = function(type) {
             type = type || null;
             if (type == null)
                 return this.children.slice();
             var children = [];
-            for (var i = 0, k = this.children.length; i < k; ++i)
+            for (var i=0, k=this.children.length; i<k; ++i)
                 if (this.children[i] instanceof type)
                     children.push(this.children[i]);
             return children;
@@ -5444,7 +6373,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the child cannot be added (duplicate)
          * @expose
          */
-        NamespacePrototype.addChild = function (child) {
+        NamespacePrototype.addChild = function(child) {
             var other;
             if (other = this.getChild(child.name)) {
                 // Try to revert camelcase transformation on collision
@@ -5453,7 +6382,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 else if (child instanceof Message.Field && child.name !== child.originalName && this.getChild(child.originalName) === null)
                     child.name = child.originalName;
                 else
-                    throw Error(this.toString(true) + ": " + child.name);
+                    throw Error("Duplicate name in namespace "+this.toString(true)+": "+child.name);
             }
             this.children.push(child);
         };
@@ -5464,9 +6393,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @return {?ProtoBuf.Reflect.T} The child or null if not found
          * @expose
          */
-        NamespacePrototype.getChild = function (nameOrId) {
+        NamespacePrototype.getChild = function(nameOrId) {
             var key = typeof nameOrId === 'number' ? 'id' : 'name';
-            for (var i = 0, k = this.children.length; i < k; ++i)
+            for (var i=0, k=this.children.length; i<k; ++i)
                 if (this.children[i][key] === nameOrId)
                     return this.children[i];
             return null;
@@ -5479,7 +6408,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @return {?ProtoBuf.Reflect.Namespace} The resolved type or null if not found
          * @expose
          */
-        NamespacePrototype.resolve = function (qn, excludeNonNamespace) {
+        NamespacePrototype.resolve = function(qn, excludeNonNamespace) {
             var part = typeof qn === 'string' ? qn.split(".") : qn,
                 ptr = this,
                 i = 0;
@@ -5517,14 +6446,14 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {string} The shortest qualified name or, if there is none, the fqn
          * @expose
          */
-        NamespacePrototype.qn = function (t) {
+        NamespacePrototype.qn = function(t) {
             var part = [], ptr = t;
             do {
                 part.unshift(ptr.name);
                 ptr = ptr.parent;
             } while (ptr !== null);
-            for (var len = 1; len <= part.length; len++) {
-                var qn = part.slice(part.length - len);
+            for (var len=1; len <= part.length; len++) {
+                var qn = part.slice(part.length-len);
                 if (t === this.resolve(qn, t instanceof Reflect.Namespace))
                     return qn.join(".");
             }
@@ -5536,11 +6465,11 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @return {Object.<string,Function|Object>} Runtime namespace
          * @expose
          */
-        NamespacePrototype.build = function () {
+        NamespacePrototype.build = function() {
             /** @dict */
             var ns = {};
             var children = this.children;
-            for (var i = 0, k = children.length, child; i < k; ++i) {
+            for (var i=0, k=children.length, child; i<k; ++i) {
                 child = children[i];
                 if (child instanceof Namespace)
                     ns[child.name] = child.build();
@@ -5554,10 +6483,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * Builds the namespace's '$options' property.
          * @return {Object.<string,*>}
          */
-        NamespacePrototype.buildOpt = function () {
+        NamespacePrototype.buildOpt = function() {
             var opt = {},
                 keys = Object.keys(this.options);
-            for (var i = 0, k = keys.length; i < k; ++i) {
+            for (var i=0, k=keys.length; i<k; ++i) {
                 var key = keys[i],
                     val = this.options[keys[i]];
                 // TODO: Options are not resolved, yet.
@@ -5575,10 +6504,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {string=} name Returns the option value if specified, otherwise all options are returned.
          * @return {*|Object.<string,*>}null} Option value or NULL if there is no such option
          */
-        NamespacePrototype.getOption = function (name) {
-            if (typeof name === UND)
+        NamespacePrototype.getOption = function(name) {
+            if (typeof name === 'undefined')
                 return this.options;
-            return typeof this.options[name] !== UND ? this.options[name] : null;
+            return typeof this.options[name] !== 'undefined' ? this.options[name] : null;
         };
 
         /**
@@ -5608,7 +6537,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * messages)
          * @constructor
          */
-        var Element = function (type, resolvedType, isMapKey, syntax, name) {
+        var Element = function(type, resolvedType, isMapKey, syntax, name) {
 
             /**
              * Element type, as a string (e.g., int32).
@@ -5641,7 +6570,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
             this.name = name;
 
             if (isMapKey && ProtoBuf.MAP_KEY_TYPES.indexOf(type) < 0)
-                throw Error(type.name);
+                throw Error("Invalid map key type: " + type.name);
         };
 
         var ElementPrototype = Element.prototype;
@@ -5655,8 +6584,8 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
         function mkDefault(type) {
             if (typeof type === 'string')
                 type = ProtoBuf.TYPES[type];
-            if (typeof type.defaultValue === UND)
-                throw Error(type.name);
+            if (typeof type.defaultValue === 'undefined')
+                throw Error("default value for type "+type.name+" is not supported");
             if (type == ProtoBuf.TYPES["bytes"])
                 return new ByteBuffer(0);
             return type.defaultValue;
@@ -5682,15 +6611,15 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
         function mkLong(value, unsigned) {
             if (value && typeof value.low === 'number' && typeof value.high === 'number' && typeof value.unsigned === 'boolean'
                 && value.low === value.low && value.high === value.high)
-                return new ProtoBuf.Long(value.low, value.high, typeof unsigned === UND ? value.unsigned : unsigned);
+                return new ProtoBuf.Long(value.low, value.high, typeof unsigned === 'undefined' ? value.unsigned : unsigned);
             if (typeof value === 'string')
                 return ProtoBuf.Long.fromString(value, unsigned || false, 10);
             if (typeof value === 'number')
                 return ProtoBuf.Long.fromNumber(value, unsigned || false);
-            throw Error(value);
+            throw Error("not convertible to Long");
         }
 
-        ElementPrototype.toString = function () {
+        ElementPrototype.toString = function() {
             return (this.name || '') + (this.isMapKey ? 'map' : 'value') + ' element';
         }
 
@@ -5702,10 +6631,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the value cannot be verified for this element slot
          * @expose
          */
-        ElementPrototype.verifyValue = function (value) {
+        ElementPrototype.verifyValue = function(value) {
             var self = this;
             function fail(val, msg) {
-                throw Error(self.toString(true) + " of type " + self.type.name + ": " + val + " (" + msg + ")");
+                throw Error("Illegal value for "+self.toString(true)+" of type "+self.type.name+": "+val+" ("+msg+")");
             }
             switch (this.type) {
                 // Signed 32bit
@@ -5768,7 +6697,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 case ProtoBuf.TYPES["string"]:
                     if (typeof value !== 'string' && !(value && value instanceof String))
                         fail(typeof value, "not a string");
-                    return "" + value; // Convert String object to string
+                    return ""+value; // Convert String object to string
 
                 // Length-delimited bytes
                 case ProtoBuf.TYPES["bytes"]:
@@ -5779,7 +6708,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 // Constant enum value
                 case ProtoBuf.TYPES["enum"]: {
                     var values = this.resolvedType.getChildren(ProtoBuf.Reflect.Enum.Value);
-                    for (i = 0; i < values.length; i++)
+                    for (i=0; i<values.length; i++)
                         if (values[i].name == value)
                             return values[i].id;
                         else if (values[i].id == value)
@@ -5818,7 +6747,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
             }
 
             // We should never end here
-            throw Error(this.toString(true) + ": " + value + " (undefined type " + this.type + ")");
+            throw Error("[INTERNAL] Illegal value for "+this.toString(true)+": "+value+" (undefined type "+this.type+")");
         };
 
         /**
@@ -5829,7 +6758,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the value cannot be calculated
          * @expose
          */
-        ElementPrototype.calculateLength = function (id, value) {
+        ElementPrototype.calculateLength = function(id, value) {
             if (value === null) return 0; // Nothing to encode
             // Tag has already been written
             var n;
@@ -5863,7 +6792,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     return ByteBuffer.calculateVarint32(n) + n;
                 case ProtoBuf.TYPES["bytes"]:
                     if (value.remaining() < 0)
-                        throw Error(this.toString(true) + ": " + value.remaining() + " bytes remaining");
+                        throw Error("Illegal value for "+this.toString(true)+": "+value.remaining()+" bytes remaining");
                     return ByteBuffer.calculateVarint32(value.remaining()) + value.remaining();
                 case ProtoBuf.TYPES["message"]:
                     n = this.resolvedType.calculate(value);
@@ -5873,7 +6802,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     return n + ByteBuffer.calculateVarint32((id << 3) | ProtoBuf.WIRE_TYPES.ENDGROUP);
             }
             // We should never end here
-            throw Error(this.toString(true) + ": " + value + " (unknown type)");
+            throw Error("[INTERNAL] Illegal value to encode in "+this.toString(true)+": "+value+" (unknown type)");
         };
 
         /**
@@ -5885,7 +6814,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the value cannot be encoded
          * @expose
          */
-        ElementPrototype.encodeValue = function (id, value, buffer) {
+        ElementPrototype.encodeValue = function(id, value, buffer) {
             if (value === null) return buffer; // Nothing to encode
             // Tag has already been written
 
@@ -5972,7 +6901,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 // Length-delimited bytes
                 case ProtoBuf.TYPES["bytes"]:
                     if (value.remaining() < 0)
-                        throw Error(this.toString(true) + ": " + value.remaining() + " bytes remaining");
+                        throw Error("Illegal value for "+this.toString(true)+": "+value.remaining()+" bytes remaining");
                     var prevOffset = value.offset;
                     buffer.writeVarint32(value.remaining());
                     buffer.append(value);
@@ -5995,7 +6924,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
 
                 default:
                     // We should never end here
-                    throw Error(this.toString(true) + ": " + value + " (unknown type)");
+                    throw Error("[INTERNAL] Illegal value to encode in "+this.toString(true)+": "+value+" (unknown type)");
             }
             return buffer;
         };
@@ -6009,9 +6938,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the field cannot be decoded
          * @expose
          */
-        ElementPrototype.decode = function (buffer, wireType, id) {
+        ElementPrototype.decode = function(buffer, wireType, id) {
             if (wireType != this.type.wireType)
-                throw Error(wireType);
+                throw Error("Unexpected wire type for element");
 
             var value, nBytes;
             switch (this.type) {
@@ -6079,9 +7008,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 case ProtoBuf.TYPES["bytes"]: {
                     nBytes = buffer.readVarint32();
                     if (buffer.remaining() < nBytes)
-                        throw Error(this.toString(true) + ": " + nBytes + " required but got only " + buffer.remaining());
+                        throw Error("Illegal number of bytes for "+this.toString(true)+": "+nBytes+" required but got only "+buffer.remaining());
                     value = buffer.clone(); // Offset already set
-                    value.limit = value.offset + nBytes;
+                    value.limit = value.offset+nBytes;
                     buffer.offset += nBytes;
                     return value;
                 }
@@ -6098,7 +7027,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
             }
 
             // We should never end here
-            throw Error(this.toString(true));
+            throw Error("[INTERNAL] Illegal decode type");
         };
 
         /**
@@ -6109,9 +7038,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {string} str The string value
          * @returns {*} The value
          */
-        ElementPrototype.valueFromString = function (str) {
+        ElementPrototype.valueFromString = function(str) {
             if (!this.isMapKey) {
-                throw Error(this.toString(true));
+                throw Error("valueFromString() called on non-map-key element");
             }
 
             switch (this.type) {
@@ -6127,17 +7056,17 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 case ProtoBuf.TYPES["sfixed64"]:
                 case ProtoBuf.TYPES["uint64"]:
                 case ProtoBuf.TYPES["fixed64"]:
-                    // Long-based fields support conversions from string already.
-                    return this.verifyValue(str);
+                      // Long-based fields support conversions from string already.
+                      return this.verifyValue(str);
 
                 case ProtoBuf.TYPES["bool"]:
-                    return str === "true";
+                      return str === "true";
 
                 case ProtoBuf.TYPES["string"]:
-                    return this.verifyValue(str);
+                      return this.verifyValue(str);
 
                 case ProtoBuf.TYPES["bytes"]:
-                    return ByteBuffer.fromBinary(str);
+                      return ByteBuffer.fromBinary(str);
             }
         };
 
@@ -6156,9 +7085,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {*} val The value
          * @returns {string} The string form of the value.
          */
-        ElementPrototype.valueToString = function (value) {
+        ElementPrototype.valueToString = function(value) {
             if (!this.isMapKey) {
-                throw Error(this.toString(true));
+                throw Error("valueToString() called on non-map-key element");
             }
 
             if (this.type === ProtoBuf.TYPES["bytes"]) {
@@ -6186,7 +7115,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @constructor
          * @extends ProtoBuf.Reflect.Namespace
          */
-        var Message = function (builder, parent, name, options, isGroup, syntax) {
+        var Message = function(builder, parent, name, options, isGroup, syntax) {
             Namespace.call(this, builder, parent, name, options, syntax);
 
             /**
@@ -6253,12 +7182,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the message cannot be built
          * @expose
          */
-        MessagePrototype.build = function (rebuild) {
+        MessagePrototype.build = function(rebuild) {
             if (this.clazz && !rebuild)
                 return this.clazz;
 
             // Create the runtime Message class in its own scope
-            var clazz = (function (ProtoBuf, T) {
+            var clazz = (function(ProtoBuf, T) {
 
                 var fields = T.getChildren(ProtoBuf.Reflect.Message.Field),
                     oneofs = T.getChildren(ProtoBuf.Reflect.Message.OneOf);
@@ -6272,18 +7201,18 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @constructor
                  * @throws {Error} If the message cannot be created
                  */
-                var Message = function (values, var_args) {
+                var Message = function(values, var_args) {
                     ProtoBuf.Builder.Message.call(this);
 
                     // Create virtual oneof properties
-                    for (var i = 0, k = oneofs.length; i < k; ++i)
+                    for (var i=0, k=oneofs.length; i<k; ++i)
                         this[oneofs[i].name] = null;
                     // Create fields and set default values
-                    for (i = 0, k = fields.length; i < k; ++i) {
+                    for (i=0, k=fields.length; i<k; ++i) {
                         var field = fields[i];
                         this[field.name] =
                             field.repeated ? [] :
-                                (field.map ? new ProtoBuf.Map(field) : null);
+                            (field.map ? new ProtoBuf.Map(field) : null);
                         if ((field.required || T.syntax === 'proto3') &&
                             field.defaultValue !== null)
                             this[field.name] = field.defaultValue;
@@ -6301,8 +7230,8 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                             /* not a Long */ !(ProtoBuf.Long && values instanceof ProtoBuf.Long)) {
                             this.$set(values);
                         } else // Set field values from arguments, in declaration order
-                            for (i = 0, k = arguments.length; i < k; ++i)
-                                if (typeof (value = arguments[i]) !== UND)
+                            for (i=0, k=arguments.length; i<k; ++i)
+                                if (typeof (value = arguments[i]) !== 'undefined')
                                     this.$set(fields[i].name, value); // May throw
                     }
                 };
@@ -6324,15 +7253,15 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @throws {Error} If the value cannot be added
                  * @expose
                  */
-                MessagePrototype.add = function (key, value, noAssert) {
+                MessagePrototype.add = function(key, value, noAssert) {
                     var field = T._fieldsByName[key];
                     if (!noAssert) {
                         if (!field)
-                            throw Error(this + "#" + key + " is undefined");
+                            throw Error(this+"#"+key+" is undefined");
                         if (!(field instanceof ProtoBuf.Reflect.Message.Field))
-                            throw Error(this + "#" + key + " is not a field: " + field.toString(true)); // May throw if it's an enum or embedded message
+                            throw Error(this+"#"+key+" is not a field: "+field.toString(true)); // May throw if it's an enum or embedded message
                         if (!field.repeated)
-                            throw Error(this + "#" + key + " is not a repeated field");
+                            throw Error(this+"#"+key+" is not a repeated field");
                         value = field.verifyValue(value, true);
                     }
                     if (this[key] === null)
@@ -6365,12 +7294,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @throws {Error} If the value cannot be set
                  * @expose
                  */
-                MessagePrototype.set = function (keyOrObj, value, noAssert) {
+                MessagePrototype.set = function(keyOrObj, value, noAssert) {
                     if (keyOrObj && typeof keyOrObj === 'object') {
                         noAssert = value;
                         for (var ikey in keyOrObj) {
                             // Check if virtual oneof field - don't set these
-                            if (keyOrObj.hasOwnProperty(ikey) && typeof (value = keyOrObj[ikey]) !== UND && T._oneofsByName[ikey] === undefined)
+                            if (keyOrObj.hasOwnProperty(ikey) && typeof (value = keyOrObj[ikey]) !== 'undefined' && T._oneofsByName[ikey] === undefined)
                                 this.$set(ikey, value, noAssert);
                         }
                         return this;
@@ -6378,9 +7307,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     var field = T._fieldsByName[keyOrObj];
                     if (!noAssert) {
                         if (!field)
-                            throw Error(this + "#" + keyOrObj + " is not a field: undefined");
+                            throw Error(this+"#"+keyOrObj+" is not a field: undefined");
                         if (!(field instanceof ProtoBuf.Reflect.Message.Field))
-                            throw Error(this + "#" + keyOrObj + " is not a field: " + field.toString(true));
+                            throw Error(this+"#"+keyOrObj+" is not a field: "+field.toString(true));
                         this[field.name] = (value = field.verifyValue(value)); // May throw
                     } else
                         this[keyOrObj] = value;
@@ -6418,14 +7347,14 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @throws {Error} If there is no such field
                  * @expose
                  */
-                MessagePrototype.get = function (key, noAssert) {
+                MessagePrototype.get = function(key, noAssert) {
                     if (noAssert)
                         return this[key];
                     var field = T._fieldsByName[key];
                     if (!field || !(field instanceof ProtoBuf.Reflect.Message.Field))
-                        throw Error(this + "#" + key + " is not a field: undefined");
+                        throw Error(this+"#"+key+" is not a field: undefined");
                     if (!(field instanceof ProtoBuf.Reflect.Message.Field))
-                        throw Error(this + "#" + key + " is not a field: " + field.toString(true));
+                        throw Error(this+"#"+key+" is not a field: "+field.toString(true));
                     return this[field.name];
                 };
 
@@ -6442,23 +7371,23 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
 
                 // Getters and setters
 
-                for (var i = 0; i < fields.length; i++) {
+                for (var i=0; i<fields.length; i++) {
                     var field = fields[i];
                     // no setters for extension fields as these are named by their fqn
                     if (field instanceof ProtoBuf.Reflect.Message.ExtensionField)
                         continue;
 
                     if (T.builder.options['populateAccessors'])
-                        (function (field) {
+                        (function(field) {
                             // set/get[SomeValue]
-                            var Name = field.originalName.replace(/(_[a-zA-Z])/g, function (match) {
-                                return match.toUpperCase().replace('_', '');
+                            var Name = field.originalName.replace(/(_[a-zA-Z])/g, function(match) {
+                                return match.toUpperCase().replace('_','');
                             });
-                            Name = Name.substring(0, 1).toUpperCase() + Name.substring(1);
+                            Name = Name.substring(0,1).toUpperCase() + Name.substring(1);
 
                             // set/get_[some_value] FIXME: Do we really need these?
-                            var name = field.originalName.replace(/([A-Z])/g, function (match) {
-                                return "_" + match;
+                            var name = field.originalName.replace(/([A-Z])/g, function(match) {
+                                return "_"+match;
                             });
 
                             /**
@@ -6469,7 +7398,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                              * @returns {!ProtoBuf.Builder.Message}
                              * @inner
                              */
-                            var setter = function (value, noAssert) {
+                            var setter = function(value, noAssert) {
                                 this[field.name] = noAssert ? value : field.verifyValue(value);
                                 return this;
                             };
@@ -6480,11 +7409,11 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                              * @returns {*}
                              * @inner
                              */
-                            var getter = function () {
+                            var getter = function() {
                                 return this[field.name];
                             };
 
-                            if (T.getChild("set" + Name) === null)
+                            if (T.getChild("set"+Name) === null)
                                 /**
                                  * Sets a value. This method is present for each field, but only if there is no name conflict with
                                  *  another field.
@@ -6496,9 +7425,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                                  * @abstract
                                  * @throws {Error} If the value cannot be set
                                  */
-                                MessagePrototype["set" + Name] = setter;
+                                MessagePrototype["set"+Name] = setter;
 
-                            if (T.getChild("set_" + name) === null)
+                            if (T.getChild("set_"+name) === null)
                                 /**
                                  * Sets a value. This method is present for each field, but only if there is no name conflict with
                                  *  another field.
@@ -6510,9 +7439,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                                  * @abstract
                                  * @throws {Error} If the value cannot be set
                                  */
-                                MessagePrototype["set_" + name] = setter;
+                                MessagePrototype["set_"+name] = setter;
 
-                            if (T.getChild("get" + Name) === null)
+                            if (T.getChild("get"+Name) === null)
                                 /**
                                  * Gets a value. This method is present for each field, but only if there is no name conflict with
                                  *  another field.
@@ -6521,9 +7450,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                                  * @abstract
                                  * @return {*} The value
                                  */
-                                MessagePrototype["get" + Name] = getter;
+                                MessagePrototype["get"+Name] = getter;
 
-                            if (T.getChild("get_" + name) === null)
+                            if (T.getChild("get_"+name) === null)
                                 /**
                                  * Gets a value. This method is present for each field, but only if there is no name conflict with
                                  *  another field.
@@ -6532,7 +7461,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                                  * @return {*} The value
                                  * @abstract
                                  */
-                                MessagePrototype["get_" + name] = getter;
+                                MessagePrototype["get_"+name] = getter;
 
                         })(field);
                 }
@@ -6553,21 +7482,21 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @see ProtoBuf.Builder.Message#encodeHex
                  * @see ProtoBuf.Builder.Message#encodeAB
                  */
-                MessagePrototype.encode = function (buffer, noVerify) {
+                MessagePrototype.encode = function(buffer, noVerify) {
                     if (typeof buffer === 'boolean')
                         noVerify = buffer,
-                            buffer = undefined;
+                        buffer = undefined;
                     var isNew = false;
                     if (!buffer)
                         buffer = new ByteBuffer(),
-                            isNew = true;
+                        isNew = true;
                     var le = buffer.littleEndian;
                     try {
                         T.encode(this, buffer.LE(), noVerify);
                         return (isNew ? buffer.flip() : buffer).LE(le);
                     } catch (e) {
                         buffer.LE(le);
-                        throw (e);
+                        throw(e);
                     }
                 };
 
@@ -6579,7 +7508,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @return {!ByteBuffer} Encoded message as a ByteBuffer
                  * @expose
                  */
-                Message.encode = function (data, buffer, noVerify) {
+                Message.encode = function(data, buffer, noVerify) {
                     return new Message(data).encode(buffer, noVerify);
                 };
 
@@ -6591,7 +7520,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @throws {Error} If the message cannot be calculated or if required fields are missing.
                  * @expose
                  */
-                MessagePrototype.calculate = function () {
+                MessagePrototype.calculate = function() {
                     return T.calculate(this);
                 };
 
@@ -6606,11 +7535,11 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  *  returns the encoded ByteBuffer in the `encoded` property on the error.
                  * @expose
                  */
-                MessagePrototype.encodeDelimited = function (buffer, noVerify) {
+                MessagePrototype.encodeDelimited = function(buffer, noVerify) {
                     var isNew = false;
                     if (!buffer)
                         buffer = new ByteBuffer(),
-                            isNew = true;
+                        isNew = true;
                     var enc = new ByteBuffer().LE();
                     T.encode(this, enc, noVerify).flip();
                     buffer.writeVarint32(enc.remaining());
@@ -6627,12 +7556,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  *  returns the encoded ArrayBuffer in the `encoded` property on the error.
                  * @expose
                  */
-                MessagePrototype.encodeAB = function () {
+                MessagePrototype.encodeAB = function() {
                     try {
                         return this.encode().toArrayBuffer();
                     } catch (e) {
                         if (e["encoded"]) e["encoded"] = e["encoded"].toArrayBuffer();
-                        throw (e);
+                        throw(e);
                     }
                 };
 
@@ -6656,12 +7585,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  *  missing. The later still returns the encoded node Buffer in the `encoded` property on the error.
                  * @expose
                  */
-                MessagePrototype.encodeNB = function () {
+                MessagePrototype.encodeNB = function() {
                     try {
                         return this.encode().toBuffer();
                     } catch (e) {
                         if (e["encoded"]) e["encoded"] = e["encoded"].toBuffer();
-                        throw (e);
+                        throw(e);
                     }
                 };
 
@@ -6685,12 +7614,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  *  still returns the encoded base64 string in the `encoded` property on the error.
                  * @expose
                  */
-                MessagePrototype.encode64 = function () {
+                MessagePrototype.encode64 = function() {
                     try {
                         return this.encode().toBase64();
                     } catch (e) {
                         if (e["encoded"]) e["encoded"] = e["encoded"].toBase64();
-                        throw (e);
+                        throw(e);
                     }
                 };
 
@@ -6714,12 +7643,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  *  still returns the encoded hex string in the `encoded` property on the error.
                  * @expose
                  */
-                MessagePrototype.encodeHex = function () {
+                MessagePrototype.encodeHex = function() {
                     try {
                         return this.encode().toHex();
                     } catch (e) {
                         if (e["encoded"]) e["encoded"] = e["encoded"].toHex();
-                        throw (e);
+                        throw(e);
                     }
                 };
 
@@ -6764,7 +7693,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     // Clone arrays
                     if (Array.isArray(obj)) {
                         clone = [];
-                        obj.forEach(function (v, k) {
+                        obj.forEach(function(v, k) {
                             clone[k] = cloneRaw(v, binaryAsBase64, longsAsStrings, resolvedType);
                         });
                         return clone;
@@ -6797,7 +7726,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @returns {Object.<string,*>} Raw payload
                  * @expose
                  */
-                MessagePrototype.toRaw = function (binaryAsBase64, longsAsStrings) {
+                MessagePrototype.toRaw = function(binaryAsBase64, longsAsStrings) {
                     return cloneRaw(this, !!binaryAsBase64, !!longsAsStrings, this.$type);
                 };
 
@@ -6806,12 +7735,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @returns {string} JSON string
                  * @expose
                  */
-                MessagePrototype.encodeJSON = function () {
+                MessagePrototype.encodeJSON = function() {
                     return JSON.stringify(
                         cloneRaw(this,
                              /* binary-as-base64 */ true,
                              /* longs-as-strings */ true,
-                            this.$type
+                             this.$type
                         )
                     );
                 };
@@ -6830,10 +7759,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @see ProtoBuf.Builder.Message.decode64
                  * @see ProtoBuf.Builder.Message.decodeHex
                  */
-                Message.decode = function (buffer, length, enc) {
+                Message.decode = function(buffer, length, enc) {
                     if (typeof length === 'string')
                         enc = length,
-                            length = -1;
+                        length = -1;
                     if (typeof buffer === 'string')
                         buffer = ByteBuffer.wrap(buffer, enc ? enc : "base64");
                     else if (!ByteBuffer.isByteBuffer(buffer))
@@ -6845,7 +7774,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                         return msg;
                     } catch (e) {
                         buffer.LE(le);
-                        throw (e);
+                        throw(e);
                     }
                 };
 
@@ -6860,7 +7789,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  *  returns the decoded message with missing fields in the `decoded` property on the error.
                  * @expose
                  */
-                Message.decodeDelimited = function (buffer, enc) {
+                Message.decodeDelimited = function(buffer, enc) {
                     if (typeof buffer === 'string')
                         buffer = ByteBuffer.wrap(buffer, enc ? enc : "base64");
                     else if (!ByteBuffer.isByteBuffer(buffer))
@@ -6893,7 +7822,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  *  returns the decoded message with missing fields in the `decoded` property on the error.
                  * @expose
                  */
-                Message.decode64 = function (str) {
+                Message.decode64 = function(str) {
                     return Message.decode(str, "base64");
                 };
 
@@ -6907,7 +7836,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  *  returns the decoded message with missing fields in the `decoded` property on the error.
                  * @expose
                  */
-                Message.decodeHex = function (str) {
+                Message.decodeHex = function(str) {
                     return Message.decode(str, "hex");
                 };
 
@@ -6921,7 +7850,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * missing.
                  * @expose
                  */
-                Message.decodeJSON = function (str) {
+                Message.decodeJSON = function(str) {
                     return new Message(JSON.parse(str));
                 };
 
@@ -6934,7 +7863,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                  * @return {string} String representation as of ".Fully.Qualified.MessageName"
                  * @expose
                  */
-                MessagePrototype.toString = function () {
+                MessagePrototype.toString = function() {
                     return T.toString();
                 };
 
@@ -6974,9 +7903,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
 
                 if (Object.defineProperty)
                     Object.defineProperty(Message, '$options', { "value": T.buildOpt() }),
-                        Object.defineProperty(MessagePrototype, "$options", { "value": Message["$options"] }),
-                        Object.defineProperty(Message, "$type", { "value": T }),
-                        Object.defineProperty(MessagePrototype, "$type", { "value": T });
+                    Object.defineProperty(MessagePrototype, "$options", { "value": Message["$options"] }),
+                    Object.defineProperty(Message, "$type", { "value": T }),
+                    Object.defineProperty(MessagePrototype, "$type", { "value": T });
 
                 return Message;
 
@@ -6987,22 +7916,22 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
             this._fieldsById = {};
             this._fieldsByName = {};
             this._oneofsByName = {};
-            for (var i = 0, k = this.children.length, child; i < k; i++) {
+            for (var i=0, k=this.children.length, child; i<k; i++) {
                 child = this.children[i];
-                if (child instanceof Enum || child instanceof Message) {
+                if (child instanceof Enum || child instanceof Message || child instanceof Service) {
                     if (clazz.hasOwnProperty(child.name))
-                        throw Error( child.name + " cannot override static property '" + child.name + "'");
+                        throw Error("Illegal reflect child of "+this.toString(true)+": "+child.toString(true)+" cannot override static property '"+child.name+"'");
                     clazz[child.name] = child.build();
                 } else if (child instanceof Message.Field)
                     child.build(),
-                        this._fields.push(child),
-                        this._fieldsById[child.id] = child,
-                        this._fieldsByName[child.name] = child;
+                    this._fields.push(child),
+                    this._fieldsById[child.id] = child,
+                    this._fieldsByName[child.name] = child;
                 else if (child instanceof Message.OneOf) {
                     this._oneofsByName[child.name] = child;
                 }
                 else if (!(child instanceof Message.OneOf) && !(child instanceof Extension)) // Not built
-                    throw Error(this.toString(true) + ": " + this.children[i].toString(true));
+                    throw Error("Illegal reflect child of "+this.toString(true)+": "+this.children[i].toString(true));
             }
 
             return this.clazz = clazz;
@@ -7017,10 +7946,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If required fields are missing or the message cannot be encoded for another reason
          * @expose
          */
-        MessagePrototype.encode = function (message, buffer, noVerify) {
+        MessagePrototype.encode = function(message, buffer, noVerify) {
             var fieldMissing = null,
                 field;
-            for (var i = 0, k = this._fields.length, val; i < k; ++i) {
+            for (var i=0, k=this._fields.length, val; i<k; ++i) {
                 field = this._fields[i];
                 val = message[field.name];
                 if (field.required && val === null) {
@@ -7030,9 +7959,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     field.encode(noVerify ? val : field.verifyValue(val), buffer, message);
             }
             if (fieldMissing !== null) {
-                var err = Error( this.toString(true) + ": " + fieldMissing);
+                var err = Error("Missing at least one required field for "+this.toString(true)+": "+fieldMissing);
                 err["encoded"] = buffer; // Still expose what we got
-                throw (err);
+                throw(err);
             }
             return buffer;
         };
@@ -7044,12 +7973,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If required fields are missing or the message cannot be calculated for another reason
          * @expose
          */
-        MessagePrototype.calculate = function (message) {
-            for (var n = 0, i = 0, k = this._fields.length, field, val; i < k; ++i) {
+        MessagePrototype.calculate = function(message) {
+            for (var n=0, i=0, k=this._fields.length, field, val; i<k; ++i) {
                 field = this._fields[i];
                 val = message[field.name];
                 if (field.required && val === null)
-                    throw Error(this.toString(true) + ": " + field);
+                   throw Error("Missing at least one required field for "+this.toString(true)+": "+field);
                 else
                     n += field.calculate(val, message);
             }
@@ -7087,12 +8016,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     if (id === expectedId)
                         return false;
                     else
-                        throw Error(id + " (" + expectedId + " expected)");
+                        throw Error("Illegal GROUPEND after unknown group: "+id+" ("+expectedId+" expected)");
                 case ProtoBuf.WIRE_TYPES.BITS32:
                     buf.offset += 4;
                     break;
                 default:
-                    throw Error(expectedId + ": " + wireType);
+                    throw Error("Illegal wire type in unknown group "+expectedId+": "+wireType);
             }
             return true;
         }
@@ -7106,19 +8035,19 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the message cannot be decoded
          * @expose
          */
-        MessagePrototype.decode = function (buffer, length, expectedGroupEndId) {
+        MessagePrototype.decode = function(buffer, length, expectedGroupEndId) {
             if (typeof length !== 'number')
                 length = -1;
             var start = buffer.offset,
                 msg = new (this.clazz)(),
                 tag, wireType, id, field;
-            while (buffer.offset < start + length || (length === -1 && buffer.remaining() > 0)) {
+            while (buffer.offset < start+length || (length === -1 && buffer.remaining() > 0)) {
                 tag = buffer.readVarint32();
                 wireType = tag & 0x07;
                 id = tag >>> 3;
                 if (wireType === ProtoBuf.WIRE_TYPES.ENDGROUP) {
                     if (id !== expectedGroupEndId)
-                        throw Error(this.toString(true) + ": " + id + " (" + (expectedGroupEndId ? expectedGroupEndId + " expected" : "not a group") + ")");
+                        throw Error("Illegal group end indicator for "+this.toString(true)+": "+id+" ("+(expectedGroupEndId ? expectedGroupEndId+" expected" : "not a group")+")");
                     break;
                 }
                 if (!(field = this._fieldsById[id])) {
@@ -7138,10 +8067,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                             buffer.offset += len;
                             break;
                         case ProtoBuf.WIRE_TYPES.STARTGROUP:
-                            while (skipTillGroupEnd(id, buffer)) { }
+                            while (skipTillGroupEnd(id, buffer)) {}
                             break;
                         default:
-                            throw Error(id + " in " + this.toString(true) + "#decode: " + wireType);
+                            throw Error("Illegal wire type for unknown field "+id+" in "+this.toString(true)+"#decode: "+wireType);
                     }
                     continue;
                 }
@@ -7162,15 +8091,15 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
             }
 
             // Check if all required fields are present and set default values for optional fields that are not
-            for (var i = 0, k = this._fields.length; i < k; ++i) {
+            for (var i=0, k=this._fields.length; i<k; ++i) {
                 field = this._fields[i];
                 if (msg[field.name] === null) {
                     if (this.syntax === "proto3") { // Proto3 sets default values by specification
                         msg[field.name] = field.defaultValue;
                     } else if (field.required) {
-                        var err = Error(this.toString(true) + ": " + field.name);
+                        var err = Error("Missing at least one required field for " + this.toString(true) + ": " + field.name);
                         err["decoded"] = msg; // Still expose what we got
-                        throw (err);
+                        throw(err);
                     } else if (ProtoBuf.populateDefaults && field.defaultValue !== null)
                         msg[field.name] = field.defaultValue;
                 }
@@ -7200,7 +8129,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @constructor
          * @extends ProtoBuf.Reflect.T
          */
-        var Field = function (builder, message, rule, keytype, type, name, id, options, oneof, syntax) {
+        var Field = function(builder, message, rule, keytype, type, name, id, options, oneof, syntax) {
             T.call(this, builder, message, name);
 
             /**
@@ -7326,7 +8255,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @override
          * @expose
          */
-        FieldPrototype.build = function () {
+        FieldPrototype.build = function() {
             this.element = new Element(this.type, this.resolvedType, false, this.syntax, this.name);
             if (this.map)
                 this.keyElement = new Element(this.keyType, undefined, true, this.syntax, this.name);
@@ -7337,7 +8266,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 this.defaultValue = Element.defaultFieldValue(this.type);
 
             // Otherwise, default values are present when explicitly specified
-            else if (typeof this.options['default'] !== UND)
+            else if (typeof this.options['default'] !== 'undefined')
                 this.defaultValue = this.verifyValue(this.options['default']);
         };
 
@@ -7349,18 +8278,17 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the value cannot be set for this field
          * @expose
          */
-        FieldPrototype.verifyValue = function (value, skipRepeated) {
+        FieldPrototype.verifyValue = function(value, skipRepeated) {
             skipRepeated = skipRepeated || false;
             var self = this;
             function fail(val, msg) {
-                throw Error(self.toString(true) + " of type " + self.type.name + ": " + val + " (" + msg + ")");
+                throw Error("Illegal value for "+self.toString(true)+" of type "+self.type.name+": "+val+" ("+msg+")");
             }
             if (value === null) { // NULL values for optional fields
                 if (this.required)
                     fail(typeof value, "required");
                 if (this.syntax === 'proto3' && this.type !== ProtoBuf.TYPES["message"])
-                    //proto3 field without field presence cannot be null
-                    fail(typeof value, "field cannot be null");
+                    fail(typeof value, "proto3 field without field presence cannot be null");
                 return null;
             }
             var i;
@@ -7368,7 +8296,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 if (!Array.isArray(value))
                     value = [value];
                 var res = [];
-                for (i = 0; i < value.length; i++)
+                for (i=0; i<value.length; i++)
                     res.push(this.element.verifyValue(value[i]));
                 return res;
             }
@@ -7377,7 +8305,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     // If not already a Map, attempt to convert.
                     if (!(value instanceof Object)) {
                         fail(typeof value,
-                            "expected ProtoBuf.Map or raw object for map field");
+                             "expected ProtoBuf.Map or raw object for map field");
                     }
                     return new ProtoBuf.Map(this, value);
                 } else {
@@ -7398,7 +8326,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {!ProtoBuf.Builder.Message} message Runtime message
          * @return {boolean} Whether the field will be present on the wire
          */
-        FieldPrototype.hasWirePresence = function (value, message) {
+        FieldPrototype.hasWirePresence = function(value, message) {
             if (this.syntax !== 'proto3')
                 return (value !== null);
             if (this.oneof && message[this.oneof.name] === this.name)
@@ -7450,9 +8378,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the field cannot be encoded
          * @expose
          */
-        FieldPrototype.encode = function (value, buffer, message) {
+        FieldPrototype.encode = function(value, buffer, message) {
             if (this.type === null || typeof this.type !== 'object')
-                throw Error(this.toString(true) + ": " + this.type);
+                throw Error("[INTERNAL] Unresolved type in "+this.toString(true)+": "+this.type);
             if (value === null || (this.repeated && value.length == 0))
                 return buffer; // Optional omitted
             try {
@@ -7467,27 +8395,27 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                         buffer.writeVarint32((this.id << 3) | ProtoBuf.WIRE_TYPES.LDELIM);
                         buffer.ensureCapacity(buffer.offset += 1); // We do not know the length yet, so let's assume a varint of length 1
                         var start = buffer.offset; // Remember where the contents begin
-                        for (i = 0; i < value.length; i++)
+                        for (i=0; i<value.length; i++)
                             this.element.encodeValue(this.id, value[i], buffer);
-                        var len = buffer.offset - start,
+                        var len = buffer.offset-start,
                             varintLen = ByteBuffer.calculateVarint32(len);
                         if (varintLen > 1) { // We need to move the contents
                             var contents = buffer.slice(start, buffer.offset);
-                            start += varintLen - 1;
+                            start += varintLen-1;
                             buffer.offset = start;
                             buffer.append(contents);
                         }
-                        buffer.writeVarint32(len, start - varintLen);
+                        buffer.writeVarint32(len, start-varintLen);
                     } else {
                         // "If your message definition has repeated elements (without the [packed=true] option), the encoded
                         // message has zero or more key-value pairs with the same tag number"
-                        for (i = 0; i < value.length; i++)
+                        for (i=0; i<value.length; i++)
                             buffer.writeVarint32((this.id << 3) | this.type.wireType),
-                                this.element.encodeValue(this.id, value[i], buffer);
+                            this.element.encodeValue(this.id, value[i], buffer);
                     }
                 } else if (this.map) {
                     // Write out each map entry as a submessage.
-                    value.forEach(function (val, key, m) {
+                    value.forEach(function(val, key, m) {
                         // Compute the length of the submessage (key, val) pair.
                         var length =
                             ByteBuffer.calculateVarint32((1 << 3) | this.keyType.wireType) +
@@ -7512,7 +8440,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     }
                 }
             } catch (e) {
-                throw Error(this.toString(true) + ": " + value + " (" + e + ")");
+                throw Error("Illegal value for "+this.toString(true)+": "+value+" ("+e+")");
             }
             return buffer;
         };
@@ -7524,10 +8452,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {number} Byte length
          * @expose
          */
-        FieldPrototype.calculate = function (value, message) {
+        FieldPrototype.calculate = function(value, message) {
             value = this.verifyValue(value); // May throw
             if (this.type === null || typeof this.type !== 'object')
-                throw Error(this.toString(true) + ": " + this.type);
+                throw Error("[INTERNAL] Unresolved type in "+this.toString(true)+": "+this.type);
             if (value === null || (this.repeated && value.length == 0))
                 return 0; // Optional omitted
             var n = 0;
@@ -7537,18 +8465,18 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     if (this.options["packed"] && ProtoBuf.PACKABLE_WIRE_TYPES.indexOf(this.type.wireType) >= 0) {
                         n += ByteBuffer.calculateVarint32((this.id << 3) | ProtoBuf.WIRE_TYPES.LDELIM);
                         ni = 0;
-                        for (i = 0; i < value.length; i++)
+                        for (i=0; i<value.length; i++)
                             ni += this.element.calculateLength(this.id, value[i]);
                         n += ByteBuffer.calculateVarint32(ni);
                         n += ni;
                     } else {
-                        for (i = 0; i < value.length; i++)
+                        for (i=0; i<value.length; i++)
                             n += ByteBuffer.calculateVarint32((this.id << 3) | this.type.wireType),
-                                n += this.element.calculateLength(this.id, value[i]);
+                            n += this.element.calculateLength(this.id, value[i]);
                     }
                 } else if (this.map) {
                     // Each map entry becomes a submessage.
-                    value.forEach(function (val, key, m) {
+                    value.forEach(function(val, key, m) {
                         // Compute the length of the submessage (key, val) pair.
                         var length =
                             ByteBuffer.calculateVarint32((1 << 3) | this.keyType.wireType) +
@@ -7567,7 +8495,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     }
                 }
             } catch (e) {
-                throw Error(this.toString(true) + ": " + value + " (" + e + ")");
+                throw Error("Illegal value for "+this.toString(true)+": "+value+" ("+e+")");
             }
             return n;
         };
@@ -7582,7 +8510,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the field cannot be decoded
          * @expose
          */
-        FieldPrototype.decode = function (wireType, buffer, skipRepeated) {
+        FieldPrototype.decode = function(wireType, buffer, skipRepeated) {
             var value, nBytes;
 
             // We expect wireType to match the underlying type's wireType unless we see
@@ -7590,10 +8518,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
             var wireTypeOK =
                 (!this.map && wireType == this.type.wireType) ||
                 (!skipRepeated && this.repeated && this.options["packed"] &&
-                    wireType == ProtoBuf.WIRE_TYPES.LDELIM) ||
+                 wireType == ProtoBuf.WIRE_TYPES.LDELIM) ||
                 (this.map && wireType == ProtoBuf.WIRE_TYPES.LDELIM);
             if (!wireTypeOK)
-                throw Error(this.toString(true) + ": " + wireType + " (" + this.type.wireType + " expected)");
+                throw Error("Illegal wire type for field "+this.toString(true)+": "+wireType+" ("+this.type.wireType+" expected)");
 
             // Handle packed repeated fields.
             if (wireType == ProtoBuf.WIRE_TYPES.LDELIM && this.repeated && this.options["packed"] && ProtoBuf.PACKABLE_WIRE_TYPES.indexOf(this.type.wireType) >= 0) {
@@ -7617,7 +8545,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 // Read the length
                 nBytes = buffer.readVarint32();
                 if (buffer.remaining() < nBytes)
-                    throw Error(this.toString(true) + ": " + nBytes + " required but got only " + buffer.remaining());
+                    throw Error("Illegal number of bytes for "+this.toString(true)+": "+nBytes+" required but got only "+buffer.remaining());
 
                 // Get a sub-buffer of this key/value submessage
                 var msgbuf = buffer.clone();
@@ -7633,7 +8561,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     } else if (id === 2) {
                         value = this.element.decode(msgbuf, wireType, id);
                     } else {
-                        throw Error(id);
+                        throw Error("Unexpected tag in map field key/value submessage");
                     }
                 }
 
@@ -7663,7 +8591,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @constructor
          * @extends ProtoBuf.Reflect.Message.Field
          */
-        var ExtensionField = function (builder, message, rule, type, name, id, options) {
+        var ExtensionField = function(builder, message, rule, type, name, id, options) {
             Field.call(this, builder, message, rule, /* keytype = */ null, type, name, id, options);
 
             /**
@@ -7692,7 +8620,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @constructor
          * @extends ProtoBuf.Reflect.T
          */
-        var OneOf = function (builder, message, name) {
+        var OneOf = function(builder, message, name) {
             T.call(this, builder, message, name);
 
             /**
@@ -7720,7 +8648,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @constructor
          * @extends ProtoBuf.Reflect.Namespace
          */
-        var Enum = function (builder, parent, name, options, syntax) {
+        var Enum = function(builder, parent, name, options, syntax) {
             Namespace.call(this, builder, parent, name, options, syntax);
 
             /**
@@ -7743,9 +8671,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {?string} Name or `null` if not present
          * @expose
          */
-        Enum.getName = function (enm, value) {
+        Enum.getName = function(enm, value) {
             var keys = Object.keys(enm);
-            for (var i = 0, key; i < keys.length; ++i)
+            for (var i=0, key; i<keys.length; ++i)
                 if (enm[key = keys[i]] === value)
                     return key;
             return null;
@@ -7763,12 +8691,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {!Object.<string,number>}
          * @expose
          */
-        EnumPrototype.build = function (rebuild) {
+        EnumPrototype.build = function(rebuild) {
             if (this.object && !rebuild)
                 return this.object;
             var enm = new ProtoBuf.Builder.Enum(),
                 values = this.getChildren(Enum.Value);
-            for (var i = 0, k = values.length; i < k; ++i)
+            for (var i=0, k=values.length; i<k; ++i)
                 enm[values[i]['name']] = values[i]['id'];
             if (Object.defineProperty)
                 Object.defineProperty(enm, '$options', {
@@ -7794,7 +8722,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @constructor
          * @extends ProtoBuf.Reflect.T
          */
-        var Value = function (builder, enm, name, id) {
+        var Value = function(builder, enm, name, id) {
             T.call(this, builder, enm, name);
 
             /**
@@ -7828,7 +8756,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {string} name Object name
          * @param {!ProtoBuf.Reflect.Message.Field} field Extension field
          */
-        var Extension = function (builder, parent, name, field) {
+        var Extension = function(builder, parent, name, field) {
             T.call(this, builder, parent, name);
 
             /**
@@ -7848,6 +8776,324 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          */
         Reflect.Extension = Extension;
 
+        /**
+         * Constructs a new Service.
+         * @exports ProtoBuf.Reflect.Service
+         * @param {!ProtoBuf.Builder} builder Builder reference
+         * @param {!ProtoBuf.Reflect.Namespace} root Root
+         * @param {string} name Service name
+         * @param {Object.<string,*>=} options Options
+         * @constructor
+         * @extends ProtoBuf.Reflect.Namespace
+         */
+        var Service = function(builder, root, name, options) {
+            Namespace.call(this, builder, root, name, options);
+
+            /**
+             * @override
+             */
+            this.className = "Service";
+
+            /**
+             * Built runtime service class.
+             * @type {?function(new:ProtoBuf.Builder.Service)}
+             */
+            this.clazz = null;
+        };
+
+        /**
+         * @alias ProtoBuf.Reflect.Service.prototype
+         * @inner
+         */
+        var ServicePrototype = Service.prototype = Object.create(Namespace.prototype);
+
+        /**
+         * Builds the service and returns the runtime counterpart, which is a fully functional class.
+         * @see ProtoBuf.Builder.Service
+         * @param {boolean=} rebuild Whether to rebuild or not
+         * @return {Function} Service class
+         * @throws {Error} If the message cannot be built
+         * @expose
+         */
+        ServicePrototype.build = function(rebuild) {
+            if (this.clazz && !rebuild)
+                return this.clazz;
+
+            // Create the runtime Service class in its own scope
+            return this.clazz = (function(ProtoBuf, T) {
+
+                /**
+                 * Constructs a new runtime Service.
+                 * @name ProtoBuf.Builder.Service
+                 * @param {function(string, ProtoBuf.Builder.Message, function(Error, ProtoBuf.Builder.Message=))=} rpcImpl RPC implementation receiving the method name and the message
+                 * @class Barebone of all runtime services.
+                 * @constructor
+                 * @throws {Error} If the service cannot be created
+                 */
+                var Service = function(rpcImpl) {
+                    ProtoBuf.Builder.Service.call(this);
+
+                    /**
+                     * Service implementation.
+                     * @name ProtoBuf.Builder.Service#rpcImpl
+                     * @type {!function(string, ProtoBuf.Builder.Message, function(Error, ProtoBuf.Builder.Message=))}
+                     * @expose
+                     */
+                    this.rpcImpl = rpcImpl || function(name, msg, callback) {
+                        // This is what a user has to implement: A function receiving the method name, the actual message to
+                        // send (type checked) and the callback that's either provided with the error as its first
+                        // argument or null and the actual response message.
+                        setTimeout(callback.bind(this, Error("Not implemented, see: https://github.com/dcodeIO/ProtoBuf.js/wiki/Services")), 0); // Must be async!
+                    };
+                };
+
+                /**
+                 * @alias ProtoBuf.Builder.Service.prototype
+                 * @inner
+                 */
+                var ServicePrototype = Service.prototype = Object.create(ProtoBuf.Builder.Service.prototype);
+
+                /**
+                 * Asynchronously performs an RPC call using the given RPC implementation.
+                 * @name ProtoBuf.Builder.Service.[Method]
+                 * @function
+                 * @param {!function(string, ProtoBuf.Builder.Message, function(Error, ProtoBuf.Builder.Message=))} rpcImpl RPC implementation
+                 * @param {ProtoBuf.Builder.Message} req Request
+                 * @param {function(Error, (ProtoBuf.Builder.Message|ByteBuffer|Buffer|string)=)} callback Callback receiving
+                 *  the error if any and the response either as a pre-parsed message or as its raw bytes
+                 * @abstract
+                 */
+
+                /**
+                 * Asynchronously performs an RPC call using the instance's RPC implementation.
+                 * @name ProtoBuf.Builder.Service#[Method]
+                 * @function
+                 * @param {ProtoBuf.Builder.Message} req Request
+                 * @param {function(Error, (ProtoBuf.Builder.Message|ByteBuffer|Buffer|string)=)} callback Callback receiving
+                 *  the error if any and the response either as a pre-parsed message or as its raw bytes
+                 * @abstract
+                 */
+
+                var rpc = T.getChildren(ProtoBuf.Reflect.Service.RPCMethod);
+                for (var i=0; i<rpc.length; i++) {
+                    (function(method) {
+
+                        // service#Method(message, callback)
+                        ServicePrototype[method.name] = function(req, callback) {
+                            try {
+                                try {
+                                    // If given as a buffer, decode the request. Will throw a TypeError if not a valid buffer.
+                                    req = method.resolvedRequestType.clazz.decode(ByteBuffer.wrap(req));
+                                } catch (err) {
+                                    if (!(err instanceof TypeError))
+                                        throw err;
+                                }
+                                if (req === null || typeof req !== 'object')
+                                    throw Error("Illegal arguments");
+                                if (!(req instanceof method.resolvedRequestType.clazz))
+                                    req = new method.resolvedRequestType.clazz(req);
+                                this.rpcImpl(method.fqn(), req, function(err, res) { // Assumes that this is properly async
+                                    if (err) {
+                                        callback(err);
+                                        return;
+                                    }
+                                    // Coalesce to empty string when service response has empty content
+                                    if (res === null)
+                                        res = ''
+                                    try { res = method.resolvedResponseType.clazz.decode(res); } catch (notABuffer) {}
+                                    if (!res || !(res instanceof method.resolvedResponseType.clazz)) {
+                                        callback(Error("Illegal response type received in service method "+ T.name+"#"+method.name));
+                                        return;
+                                    }
+                                    callback(null, res);
+                                });
+                            } catch (err) {
+                                setTimeout(callback.bind(this, err), 0);
+                            }
+                        };
+
+                        // Service.Method(rpcImpl, message, callback)
+                        Service[method.name] = function(rpcImpl, req, callback) {
+                            new Service(rpcImpl)[method.name](req, callback);
+                        };
+
+                        if (Object.defineProperty)
+                            Object.defineProperty(Service[method.name], "$options", { "value": method.buildOpt() }),
+                            Object.defineProperty(ServicePrototype[method.name], "$options", { "value": Service[method.name]["$options"] });
+                    })(rpc[i]);
+                }
+
+                // Properties
+
+                /**
+                 * Service options.
+                 * @name ProtoBuf.Builder.Service.$options
+                 * @type {Object.<string,*>}
+                 * @expose
+                 */
+                var $optionsS; // cc needs this
+
+                /**
+                 * Service options.
+                 * @name ProtoBuf.Builder.Service#$options
+                 * @type {Object.<string,*>}
+                 * @expose
+                 */
+                var $options;
+
+                /**
+                 * Reflection type.
+                 * @name ProtoBuf.Builder.Service.$type
+                 * @type {!ProtoBuf.Reflect.Service}
+                 * @expose
+                 */
+                var $typeS;
+
+                /**
+                 * Reflection type.
+                 * @name ProtoBuf.Builder.Service#$type
+                 * @type {!ProtoBuf.Reflect.Service}
+                 * @expose
+                 */
+                var $type;
+
+                if (Object.defineProperty)
+                    Object.defineProperty(Service, "$options", { "value": T.buildOpt() }),
+                    Object.defineProperty(ServicePrototype, "$options", { "value": Service["$options"] }),
+                    Object.defineProperty(Service, "$type", { "value": T }),
+                    Object.defineProperty(ServicePrototype, "$type", { "value": T });
+
+                return Service;
+
+            })(ProtoBuf, this);
+        };
+
+        /**
+         * @alias ProtoBuf.Reflect.Service
+         * @expose
+         */
+        Reflect.Service = Service;
+
+        /**
+         * Abstract service method.
+         * @exports ProtoBuf.Reflect.Service.Method
+         * @param {!ProtoBuf.Builder} builder Builder reference
+         * @param {!ProtoBuf.Reflect.Service} svc Service
+         * @param {string} name Method name
+         * @param {Object.<string,*>=} options Options
+         * @constructor
+         * @extends ProtoBuf.Reflect.T
+         */
+        var Method = function(builder, svc, name, options) {
+            T.call(this, builder, svc, name);
+
+            /**
+             * @override
+             */
+            this.className = "Service.Method";
+
+            /**
+             * Options.
+             * @type {Object.<string, *>}
+             * @expose
+             */
+            this.options = options || {};
+        };
+
+        /**
+         * @alias ProtoBuf.Reflect.Service.Method.prototype
+         * @inner
+         */
+        var MethodPrototype = Method.prototype = Object.create(T.prototype);
+
+        /**
+         * Builds the method's '$options' property.
+         * @name ProtoBuf.Reflect.Service.Method#buildOpt
+         * @function
+         * @return {Object.<string,*>}
+         */
+        MethodPrototype.buildOpt = NamespacePrototype.buildOpt;
+
+        /**
+         * @alias ProtoBuf.Reflect.Service.Method
+         * @expose
+         */
+        Reflect.Service.Method = Method;
+
+        /**
+         * RPC service method.
+         * @exports ProtoBuf.Reflect.Service.RPCMethod
+         * @param {!ProtoBuf.Builder} builder Builder reference
+         * @param {!ProtoBuf.Reflect.Service} svc Service
+         * @param {string} name Method name
+         * @param {string} request Request message name
+         * @param {string} response Response message name
+         * @param {boolean} request_stream Whether requests are streamed
+         * @param {boolean} response_stream Whether responses are streamed
+         * @param {Object.<string,*>=} options Options
+         * @constructor
+         * @extends ProtoBuf.Reflect.Service.Method
+         */
+        var RPCMethod = function(builder, svc, name, request, response, request_stream, response_stream, options) {
+            Method.call(this, builder, svc, name, options);
+
+            /**
+             * @override
+             */
+            this.className = "Service.RPCMethod";
+
+            /**
+             * Request message name.
+             * @type {string}
+             * @expose
+             */
+            this.requestName = request;
+
+            /**
+             * Response message name.
+             * @type {string}
+             * @expose
+             */
+            this.responseName = response;
+
+            /**
+             * Whether requests are streamed
+             * @type {bool}
+             * @expose
+             */
+            this.requestStream = request_stream;
+
+            /**
+             * Whether responses are streamed
+             * @type {bool}
+             * @expose
+             */
+            this.responseStream = response_stream;
+
+            /**
+             * Resolved request message type.
+             * @type {ProtoBuf.Reflect.Message}
+             * @expose
+             */
+            this.resolvedRequestType = null;
+
+            /**
+             * Resolved response message type.
+             * @type {ProtoBuf.Reflect.Message}
+             * @expose
+             */
+            this.resolvedResponseType = null;
+        };
+
+        // Extends Method
+        RPCMethod.prototype = Object.create(Method.prototype);
+
+        /**
+         * @alias ProtoBuf.Reflect.Service.RPCMethod
+         * @expose
+         */
+        Reflect.Service.RPCMethod = RPCMethod;
+
         return Reflect;
 
     })(ProtoBuf);
@@ -7856,7 +9102,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
      * @alias ProtoBuf.Builder
      * @expose
      */
-    ProtoBuf.Builder = (function (ProtoBuf, Lang, Reflect) {
+    ProtoBuf.Builder = (function(ProtoBuf, Lang, Reflect) {
         "use strict";
 
         /**
@@ -7866,7 +9112,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {Object.<string,*>=} options Options
          * @constructor
          */
-        var Builder = function (options) {
+        var Builder = function(options) {
 
             /**
              * Namespace.
@@ -7932,12 +9178,12 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {boolean}
          * @expose
          */
-        Builder.isMessage = function (def) {
+        Builder.isMessage = function(def) {
             // Messages require a string name
             if (typeof def["name"] !== 'string')
                 return false;
             // Messages do not contain values (enum) or rpc methods (service)
-            if (typeof def["values"] !== UND)
+            if (typeof def["values"] !== 'undefined' || typeof def["rpc"] !== 'undefined')
                 return false;
             return true;
         };
@@ -7948,9 +9194,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {boolean}
          * @expose
          */
-        Builder.isMessageField = function (def) {
+        Builder.isMessageField = function(def) {
             // Message fields require a string rule, name and type and an id
-            if (typeof def["rule"] !== 'string' || typeof def["name"] !== 'string' || typeof def["type"] !== 'string' || typeof def["id"] === UND)
+            if (typeof def["rule"] !== 'string' || typeof def["name"] !== 'string' || typeof def["type"] !== 'string' || typeof def["id"] === 'undefined')
                 return false;
             return true;
         };
@@ -7961,12 +9207,25 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {boolean}
          * @expose
          */
-        Builder.isEnum = function (def) {
+        Builder.isEnum = function(def) {
             // Enums require a string name
             if (typeof def["name"] !== 'string')
                 return false;
             // Enums require at least one value
-            if (typeof def["values"] === UND || !Array.isArray(def["values"]) || def["values"].length === 0)
+            if (typeof def["values"] === 'undefined' || !Array.isArray(def["values"]) || def["values"].length === 0)
+                return false;
+            return true;
+        };
+
+        /**
+         * Tests if a definition most likely describes a service.
+         * @param {!Object} def
+         * @returns {boolean}
+         * @expose
+         */
+        Builder.isService = function(def) {
+            // Services require a string name and an rpc object
+            if (typeof def["name"] !== 'string' || typeof def["rpc"] !== 'object' || !def["rpc"])
                 return false;
             return true;
         };
@@ -7977,7 +9236,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {boolean}
          * @expose
          */
-        Builder.isExtend = function (def) {
+        Builder.isExtend = function(def) {
             // Extends rquire a string ref
             if (typeof def["ref"] !== 'string')
                 return false;
@@ -7991,7 +9250,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {!ProtoBuf.Builder} this
          * @expose
          */
-        BuilderPrototype.reset = function () {
+        BuilderPrototype.reset = function() {
             this.ptr = this.ns;
             return this;
         };
@@ -8002,10 +9261,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @return {!ProtoBuf.Builder} this
          * @expose
          */
-        BuilderPrototype.define = function (namespace) {
+        BuilderPrototype.define = function(namespace) {
             if (typeof namespace !== 'string' || !Lang.TYPEREF.test(namespace))
-                throw Error("illegal namespace: " + namespace);
-            namespace.split(".").forEach(function (part) {
+                throw Error("illegal namespace: "+namespace);
+            namespace.split(".").forEach(function(part) {
                 var ns = this.ptr.getChild(part);
                 if (ns === null) // Keep existing
                     this.ptr.addChild(ns = new Reflect.Namespace(this, this.ptr, part));
@@ -8021,7 +9280,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If a message definition is invalid
          * @expose
          */
-        BuilderPrototype.create = function (defs) {
+        BuilderPrototype.create = function(defs) {
             if (!defs)
                 return this; // Nothing to create
             if (!Array.isArray(defs))
@@ -8038,7 +9297,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 defs = stack.pop();
 
                 if (!Array.isArray(defs)) // Stack always contains entire namespaces
-                    throw Error(JSON.stringify(defs));
+                    throw Error("not a valid namespace: "+JSON.stringify(defs));
 
                 while (defs.length > 0) {
                     var def = defs.shift(); // Namespaces always contain an array of messages, enums and services
@@ -8049,20 +9308,20 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                         // Create OneOfs
                         var oneofs = {};
                         if (def["oneofs"])
-                            Object.keys(def["oneofs"]).forEach(function (name) {
+                            Object.keys(def["oneofs"]).forEach(function(name) {
                                 obj.addChild(oneofs[name] = new Reflect.Message.OneOf(this, obj, name));
                             }, this);
 
                         // Create fields
                         if (def["fields"])
-                            def["fields"].forEach(function (fld) {
-                                if (obj.getChild(fld["id"] | 0) !== null)
-                                    throw Error(obj.name + ": " + fld['id']);
+                            def["fields"].forEach(function(fld) {
+                                if (obj.getChild(fld["id"]|0) !== null)
+                                    throw Error("duplicate or invalid field id in "+obj.name+": "+fld['id']);
                                 if (fld["options"] && typeof fld["options"] !== 'object')
-                                    throw Error(obj.name + "#" + fld["name"]);
+                                    throw Error("illegal field options in "+obj.name+"#"+fld["name"]);
                                 var oneof = null;
                                 if (typeof fld["oneof"] === 'string' && !(oneof = oneofs[fld["oneof"]]))
-                                    throw Error(obj.name + "#" + fld["name"] + ": " + fld["oneof"]);
+                                    throw Error("illegal oneof in "+obj.name+"#"+fld["name"]+": "+fld["oneof"]);
                                 fld = new Reflect.Message.Field(this, obj, fld["rule"], fld["keytype"], fld["type"], fld["name"], fld["id"], fld["options"], oneof, def["syntax"]);
                                 if (oneof)
                                     oneof.fields.push(fld);
@@ -8072,18 +9331,22 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                         // Push children to stack
                         var subObj = [];
                         if (def["enums"])
-                            def["enums"].forEach(function (enm) {
+                            def["enums"].forEach(function(enm) {
                                 subObj.push(enm);
                             });
                         if (def["messages"])
-                            def["messages"].forEach(function (msg) {
+                            def["messages"].forEach(function(msg) {
                                 subObj.push(msg);
+                            });
+                        if (def["services"])
+                            def["services"].forEach(function(svc) {
+                                subObj.push(svc);
                             });
 
                         // Set extension ranges
                         if (def["extensions"]) {
                             if (typeof def["extensions"][0] === 'number') // pre 5.0.1
-                                obj.extensions = [def["extensions"]];
+                                obj.extensions = [ def["extensions"] ];
                             else
                                 obj.extensions = def["extensions"];
                         }
@@ -8103,8 +9366,17 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                     } else if (Builder.isEnum(def)) {
 
                         obj = new Reflect.Enum(this, this.ptr, def["name"], def["options"], def["syntax"]);
-                        def["values"].forEach(function (val) {
+                        def["values"].forEach(function(val) {
                             obj.addChild(new Reflect.Enum.Value(this, obj, val["name"], val["id"]));
+                        }, this);
+                        this.ptr.addChild(obj);
+
+                    } else if (Builder.isService(def)) {
+
+                        obj = new Reflect.Service(this, this.ptr, def["name"], def["options"]);
+                        Object.keys(def["rpc"]).forEach(function(name) {
+                            var mtd = def["rpc"][name];
+                            obj.addChild(new Reflect.Service.RPCMethod(this, obj, name, mtd["request"], mtd["response"], !!mtd["request_stream"], !!mtd["response_stream"], mtd["options"]));
                         }, this);
                         this.ptr.addChild(obj);
 
@@ -8112,25 +9384,25 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
 
                         obj = this.ptr.resolve(def["ref"], true);
                         if (obj) {
-                            def["fields"].forEach(function (fld) {
-                                if (obj.getChild(fld['id'] | 0) !== null)
-                                    throw Error(obj.name + ": " + fld['id']);
+                            def["fields"].forEach(function(fld) {
+                                if (obj.getChild(fld['id']|0) !== null)
+                                    throw Error("duplicate extended field id in "+obj.name+": "+fld['id']);
                                 // Check if field id is allowed to be extended
                                 if (obj.extensions) {
                                     var valid = false;
-                                    obj.extensions.forEach(function (range) {
+                                    obj.extensions.forEach(function(range) {
                                         if (fld["id"] >= range[0] && fld["id"] <= range[1])
                                             valid = true;
                                     });
                                     if (!valid)
-                                        throw Error(obj.name + ": " + fld['id'] + " (not within valid ranges)");
+                                        throw Error("illegal extended field id in "+obj.name+": "+fld['id']+" (not within valid ranges)");
                                 }
                                 // Convert extension field names to camel case notation if the override is set
                                 var name = fld["name"];
                                 if (this.options['convertFieldsToCamelCase'])
                                     name = ProtoBuf.Util.toCamelCase(name);
                                 // see #161: Extensions use their fully qualified name as their runtime key and...
-                                var field = new Reflect.Message.ExtensionField(this, obj, fld["rule"], fld["type"], this.ptr.fqn() + '.' + name, fld["id"], fld["options"]);
+                                var field = new Reflect.Message.ExtensionField(this, obj, fld["rule"], fld["type"], this.ptr.fqn()+'.'+name, fld["id"], fld["options"]);
                                 // ...are added on top of the current namespace as an extension which is used for
                                 // resolving their type later on (the extension always keeps the original name to
                                 // prevent naming collisions)
@@ -8141,10 +9413,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                             }, this);
 
                         } else if (!/\.?google\.protobuf\./.test(def["ref"])) // Silently skip internal extensions
-                            throw Error(def["ref"] + " is not defined");
+                            throw Error("extended message "+def["ref"]+" is not defined");
 
                     } else
-                        throw Error(JSON.stringify(def));
+                        throw Error("not a valid definition: "+JSON.stringify(def));
 
                     def = null;
                     obj = null;
@@ -8165,13 +9437,13 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          */
         function propagateSyntax(parent) {
             if (parent['messages']) {
-                parent['messages'].forEach(function (child) {
+                parent['messages'].forEach(function(child) {
                     child["syntax"] = parent["syntax"];
                     propagateSyntax(child);
                 });
             }
             if (parent['enums']) {
-                parent['enums'].forEach(function (child) {
+                parent['enums'].forEach(function(child) {
                     child["syntax"] = parent["syntax"];
                 });
             }
@@ -8185,7 +9457,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If the definition or file cannot be imported
          * @expose
          */
-        BuilderPrototype["import"] = function (json, filename) {
+        BuilderPrototype["import"] = function(json, filename) {
             var delim = '/';
 
             // Make sure to skip duplicate imports
@@ -8248,10 +9520,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 } else
                     importRoot = null;
 
-                for (var i = 0; i < json['imports'].length; i++) {
+                for (var i=0; i<json['imports'].length; i++) {
                     if (typeof json['imports'][i] === 'string') { // Import file
                         if (!importRoot)
-                            throw Error(filename);
+                            throw Error("cannot determine import root");
                         var importFilename = json['imports'][i];
                         if (importFilename === "google/protobuf/descriptor.proto")
                             continue; // Not needed and therefore not used
@@ -8265,18 +9537,18 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                             importFilename = importFilename.replace(/\.proto$/, ".json"); // always load the JSON file
                         var contents = ProtoBuf.Util.fetch(importFilename);
                         if (contents === null)
-                            throw Error(importFilename + " in '" + filename + "': file not found");
+                            throw Error("failed to import '"+importFilename+"' in '"+filename+"': file not found");
                         if (/\.json$/i.test(importFilename)) // Always possible
-                            this["import"](JSON.parse(contents + ""), importFilename); // May throw
+                            this["import"](JSON.parse(contents+""), importFilename); // May throw
                         else
                             this["import"](ProtoBuf.DotProto.Parser.parse(contents), importFilename); // May throw
                     } else // Import structure
                         if (!filename)
                             this["import"](json['imports'][i]);
                         else if (/\.(\w+)$/.test(filename)) // With extension: Append _importN to the name portion to make it unique
-                            this["import"](json['imports'][i], filename.replace(/^(.+)\.(\w+)$/, function ($0, $1, $2) { return $1 + "_import" + i + "." + $2; }));
+                            this["import"](json['imports'][i], filename.replace(/^(.+)\.(\w+)$/, function($0, $1, $2) { return $1+"_import"+i+"."+$2; }));
                         else // Without extension: Append _importN to make it unique
-                            this["import"](json['imports'][i], filename + "_import" + i);
+                            this["import"](json['imports'][i], filename+"_import"+i);
                 }
                 if (resetRoot) // Reset import root override when all imports are done
                     this.importRoot = null;
@@ -8290,15 +9562,18 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 propagateSyntax(json);
             var base = this.ptr;
             if (json['options'])
-                Object.keys(json['options']).forEach(function (key) {
+                Object.keys(json['options']).forEach(function(key) {
                     base.options[key] = json['options'][key];
                 });
             if (json['messages'])
                 this.create(json['messages']),
-                    this.ptr = base;
+                this.ptr = base;
             if (json['enums'])
                 this.create(json['enums']),
-                    this.ptr = base;
+                this.ptr = base;
+            if (json['services'])
+                this.create(json['services']),
+                this.ptr = base;
             if (json['extends'])
                 this.create(json['extends']);
 
@@ -8311,7 +9586,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @returns {!ProtoBuf.Builder} this
          * @expose
          */
-        BuilderPrototype.resolveAll = function () {
+        BuilderPrototype.resolveAll = function() {
             // Resolve all reflected objects
             var res;
             if (this.ptr == null || typeof this.ptr.type === 'object')
@@ -8319,7 +9594,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
 
             if (this.ptr instanceof Reflect.Namespace) { // Resolve children
 
-                this.ptr.children.forEach(function (child) {
+                this.ptr.children.forEach(function(child) {
                     this.ptr = child;
                     this.resolveAll();
                 }, this);
@@ -8328,20 +9603,20 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
 
                 if (!Lang.TYPE.test(this.ptr.type)) {
                     if (!Lang.TYPEREF.test(this.ptr.type))
-                        throw Error(this.ptr.toString(true) + ": " + this.ptr.type);
+                        throw Error("illegal type reference in "+this.ptr.toString(true)+": "+this.ptr.type);
                     res = (this.ptr instanceof Reflect.Message.ExtensionField ? this.ptr.extension.parent : this.ptr.parent).resolve(this.ptr.type, true);
                     if (!res)
-                        throw Error(this.ptr.toString(true) + ": " + this.ptr.type);
+                        throw Error("unresolvable type reference in "+this.ptr.toString(true)+": "+this.ptr.type);
                     this.ptr.resolvedType = res;
                     if (res instanceof Reflect.Enum) {
                         this.ptr.type = ProtoBuf.TYPES["enum"];
                         if (this.ptr.syntax === 'proto3' && res.syntax !== 'proto3')
-                            throw Error(this.ptr.toString(true) );
+                            throw Error("proto3 message cannot reference proto2 enum");
                     }
                     else if (res instanceof Reflect.Message)
                         this.ptr.type = res.isGroup ? ProtoBuf.TYPES["group"] : ProtoBuf.TYPES["message"];
                     else
-                        throw Error(this.ptr.toString(true) + ": " + this.ptr.type);
+                        throw Error("illegal type reference in "+this.ptr.toString(true)+": "+this.ptr.type);
                 } else
                     this.ptr.type = ProtoBuf.TYPES[this.ptr.type];
 
@@ -8349,26 +9624,40 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
                 // (i.e., no enums or messages), so we don't need to resolve against the current namespace.
                 if (this.ptr.map) {
                     if (!Lang.TYPE.test(this.ptr.keyType))
-                        throw Error(this.ptr.toString(true) + ": " + this.ptr.keyType);
+                        throw Error("illegal key type for map field in "+this.ptr.toString(true)+": "+this.ptr.keyType);
                     this.ptr.keyType = ProtoBuf.TYPES[this.ptr.keyType];
                 }
 
                 // If it's a repeated and packable field then proto3 mandates it should be packed by
                 // default
                 if (
-                    this.ptr.syntax === 'proto3' &&
-                    this.ptr.repeated && this.ptr.options.packed === undefined &&
-                    ProtoBuf.PACKABLE_WIRE_TYPES.indexOf(this.ptr.type.wireType) !== -1
+                  this.ptr.syntax === 'proto3' &&
+                  this.ptr.repeated && this.ptr.options.packed === undefined &&
+                  ProtoBuf.PACKABLE_WIRE_TYPES.indexOf(this.ptr.type.wireType) !== -1
                 ) {
-                    this.ptr.options.packed = true;
+                  this.ptr.options.packed = true;
                 }
+
+            } else if (this.ptr instanceof ProtoBuf.Reflect.Service.Method) {
+
+                if (this.ptr instanceof ProtoBuf.Reflect.Service.RPCMethod) {
+                    res = this.ptr.parent.resolve(this.ptr.requestName, true);
+                    if (!res || !(res instanceof ProtoBuf.Reflect.Message))
+                        throw Error("Illegal type reference in "+this.ptr.toString(true)+": "+this.ptr.requestName);
+                    this.ptr.resolvedRequestType = res;
+                    res = this.ptr.parent.resolve(this.ptr.responseName, true);
+                    if (!res || !(res instanceof ProtoBuf.Reflect.Message))
+                        throw Error("Illegal type reference in "+this.ptr.toString(true)+": "+this.ptr.responseName);
+                    this.ptr.resolvedResponseType = res;
+                } else // Should not happen as nothing else is implemented
+                    throw Error("illegal service type in "+this.ptr.toString(true));
 
             } else if (
                 !(this.ptr instanceof ProtoBuf.Reflect.Message.OneOf) && // Not built
                 !(this.ptr instanceof ProtoBuf.Reflect.Extension) && // Not built
                 !(this.ptr instanceof ProtoBuf.Reflect.Enum.Value) // Built in enum
             )
-                throw Error(typeof (this.ptr) + ": " + this.ptr);
+                throw Error("illegal object in namespace: "+typeof(this.ptr)+": "+this.ptr);
 
             return this.reset();
         };
@@ -8381,19 +9670,19 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @throws {Error} If a type could not be resolved
          * @expose
          */
-        BuilderPrototype.build = function (path) {
+        BuilderPrototype.build = function(path) {
             this.reset();
             if (!this.resolved)
                 this.resolveAll(),
-                    this.resolved = true,
-                    this.result = null; // Require re-build
+                this.resolved = true,
+                this.result = null; // Require re-build
             if (this.result === null) // (Re-)Build
                 this.result = this.ns.build();
             if (!path)
                 return this.result;
             var part = typeof path === 'string' ? path.split(".") : path,
                 ptr = this.result; // Build namespace pointer (no hasChild etc.)
-            for (var i = 0; i < part.length; i++)
+            for (var i=0; i<part.length; i++)
                 if (ptr[part[i]])
                     ptr = ptr[part[i]];
                 else {
@@ -8409,7 +9698,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {boolean=} excludeNonNamespace Excludes non-namespace types like fields, defaults to `false`
          * @returns {?ProtoBuf.Reflect.T} Reflection descriptor or `null` if not found
          */
-        BuilderPrototype.lookup = function (path, excludeNonNamespace) {
+        BuilderPrototype.lookup = function(path, excludeNonNamespace) {
             return path ? this.ns.resolve(path, excludeNonNamespace) : this.ns;
         };
 
@@ -8418,7 +9707,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @return {string} String representation as of "Builder"
          * @expose
          */
-        BuilderPrototype.toString = function () {
+        BuilderPrototype.toString = function() {
             return "Builder";
         };
 
@@ -8428,12 +9717,17 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
         /**
          * @alias ProtoBuf.Builder.Message
          */
-        Builder.Message = function () { };
+        Builder.Message = function() {};
 
         /**
          * @alias ProtoBuf.Builder.Enum
          */
-        Builder.Enum = function () { };
+        Builder.Enum = function() {};
+
+        /**
+         * @alias ProtoBuf.Builder.Message
+         */
+        Builder.Service = function() {};
 
         return Builder;
 
@@ -8443,7 +9737,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
      * @alias ProtoBuf.Map
      * @expose
      */
-    ProtoBuf.Map = (function (ProtoBuf, Reflect) {
+    ProtoBuf.Map = (function(ProtoBuf, Reflect) {
         "use strict";
 
         /**
@@ -8457,9 +9751,9 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {Object.<string,*>=} contents Initial contents
          * @constructor
          */
-        var Map = function (field, contents) {
+        var Map = function(field, contents) {
             if (!field.map)
-                throw Error(field.toString(true));
+                throw Error("field is not a map");
 
             /**
              * The field corresponding to this map.
@@ -8499,7 +9793,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
              * Returns the number of elements in the map.
              */
             Object.defineProperty(this, "size", {
-                get: function () { return Object.keys(this.map).length; }
+                get: function() { return Object.keys(this.map).length; }
             });
 
             // Fill initial contents from a raw object.
@@ -8525,7 +9819,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
         function arrayIterator(arr) {
             var idx = 0;
             return {
-                next: function () {
+                next: function() {
                     if (idx < arr.length)
                         return { done: false, value: arr[idx++] };
                     return { done: true };
@@ -8536,7 +9830,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
         /**
          * Clears the map.
          */
-        MapPrototype.clear = function () {
+        MapPrototype.clear = function() {
             this.map = {};
         };
 
@@ -8544,7 +9838,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * Deletes a particular key from the map.
          * @returns {boolean} Whether any entry with this key was deleted.
          */
-        MapPrototype["delete"] = function (key) {
+        MapPrototype["delete"] = function(key) {
             var keyValue = this.keyElem.valueToString(this.keyElem.verifyValue(key));
             var hadKey = keyValue in this.map;
             delete this.map[keyValue];
@@ -8555,11 +9849,11 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * Returns an iterator over [key, value] pairs in the map.
          * @returns {Object} The iterator
          */
-        MapPrototype.entries = function () {
+        MapPrototype.entries = function() {
             var entries = [];
             var strKeys = Object.keys(this.map);
             for (var i = 0, entry; i < strKeys.length; i++)
-                entries.push([(entry = this.map[strKeys[i]]).key, entry.value]);
+                entries.push([(entry=this.map[strKeys[i]]).key, entry.value]);
             return arrayIterator(entries);
         };
 
@@ -8567,7 +9861,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * Returns an iterator over keys in the map.
          * @returns {Object} The iterator
          */
-        MapPrototype.keys = function () {
+        MapPrototype.keys = function() {
             var keys = [];
             var strKeys = Object.keys(this.map);
             for (var i = 0; i < strKeys.length; i++)
@@ -8579,7 +9873,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * Returns an iterator over values in the map.
          * @returns {!Object} The iterator
          */
-        MapPrototype.values = function () {
+        MapPrototype.values = function() {
             var values = [];
             var strKeys = Object.keys(this.map);
             for (var i = 0; i < strKeys.length; i++)
@@ -8592,10 +9886,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {function(this:*, *, *, *)} cb The callback to invoke with value, key, and map arguments.
          * @param {Object=} thisArg The `this` value for the callback
          */
-        MapPrototype.forEach = function (cb, thisArg) {
+        MapPrototype.forEach = function(cb, thisArg) {
             var strKeys = Object.keys(this.map);
             for (var i = 0, entry; i < strKeys.length; i++)
-                cb.call(thisArg, (entry = this.map[strKeys[i]]).value, entry.key, this);
+                cb.call(thisArg, (entry=this.map[strKeys[i]]).value, entry.key, this);
         };
 
         /**
@@ -8604,7 +9898,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {*} value The value
          * @returns {!ProtoBuf.Map} The map instance
          */
-        MapPrototype.set = function (key, value) {
+        MapPrototype.set = function(key, value) {
             var keyValue = this.keyElem.verifyValue(key);
             var valValue = this.valueElem.verifyValue(value);
             this.map[this.keyElem.valueToString(keyValue)] =
@@ -8617,7 +9911,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {*} key The key
          * @returns {*|undefined} The value, or `undefined` if key not present
          */
-        MapPrototype.get = function (key) {
+        MapPrototype.get = function(key) {
             var keyValue = this.keyElem.valueToString(this.keyElem.verifyValue(key));
             if (!(keyValue in this.map))
                 return undefined;
@@ -8629,7 +9923,7 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
          * @param {*} key The key
          * @returns {boolean} `true` if the key is present
          */
-        MapPrototype.has = function (key) {
+        MapPrototype.has = function(key) {
             var keyValue = this.keyElem.valueToString(this.keyElem.verifyValue(key));
             return (keyValue in this.map);
         };
@@ -8639,16 +9933,76 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
 
 
     /**
+     * Loads a .proto string and returns the Builder.
+     * @param {string} proto .proto file contents
+     * @param {(ProtoBuf.Builder|string|{root: string, file: string})=} builder Builder to append to. Will create a new one if omitted.
+     * @param {(string|{root: string, file: string})=} filename The corresponding file name if known. Must be specified for imports.
+     * @return {ProtoBuf.Builder} Builder to create new messages
+     * @throws {Error} If the definition cannot be parsed or built
+     * @expose
+     */
+    ProtoBuf.loadProto = function(proto, builder, filename) {
+        if (typeof builder === 'string' || (builder && typeof builder["file"] === 'string' && typeof builder["root"] === 'string'))
+            filename = builder,
+            builder = undefined;
+        return ProtoBuf.loadJson(ProtoBuf.DotProto.Parser.parse(proto), builder, filename);
+    };
+
+    /**
+     * Loads a .proto string and returns the Builder. This is an alias of {@link ProtoBuf.loadProto}.
+     * @function
+     * @param {string} proto .proto file contents
+     * @param {(ProtoBuf.Builder|string)=} builder Builder to append to. Will create a new one if omitted.
+     * @param {(string|{root: string, file: string})=} filename The corresponding file name if known. Must be specified for imports.
+     * @return {ProtoBuf.Builder} Builder to create new messages
+     * @throws {Error} If the definition cannot be parsed or built
+     * @expose
+     */
+    ProtoBuf.protoFromString = ProtoBuf.loadProto; // Legacy
+
+    /**
+     * Loads a .proto file and returns the Builder.
+     * @param {string|{root: string, file: string}} filename Path to proto file or an object specifying 'file' with
+     *  an overridden 'root' path for all imported files.
+     * @param {function(?Error, !ProtoBuf.Builder=)=} callback Callback that will receive `null` as the first and
+     *  the Builder as its second argument on success, otherwise the error as its first argument. If omitted, the
+     *  file will be read synchronously and this function will return the Builder.
+     * @param {ProtoBuf.Builder=} builder Builder to append to. Will create a new one if omitted.
+     * @return {?ProtoBuf.Builder|undefined} The Builder if synchronous (no callback specified, will be NULL if the
+     *   request has failed), else undefined
+     * @expose
+     */
+    ProtoBuf.loadProtoFile = function(filename, callback, builder) {
+
+    };
+
+    /**
+     * Loads a .proto file and returns the Builder. This is an alias of {@link ProtoBuf.loadProtoFile}.
+     * @function
+     * @param {string|{root: string, file: string}} filename Path to proto file or an object specifying 'file' with
+     *  an overridden 'root' path for all imported files.
+     * @param {function(?Error, !ProtoBuf.Builder=)=} callback Callback that will receive `null` as the first and
+     *  the Builder as its second argument on success, otherwise the error as its first argument. If omitted, the
+     *  file will be read synchronously and this function will return the Builder.
+     * @param {ProtoBuf.Builder=} builder Builder to append to. Will create a new one if omitted.
+     * @return {!ProtoBuf.Builder|undefined} The Builder if synchronous (no callback specified, will be NULL if the
+     *   request has failed), else undefined
+     * @expose
+     */
+    ProtoBuf.protoFromFile = ProtoBuf.loadProtoFile; // Legacy
+
+
+    /**
      * Constructs a new empty Builder.
      * @param {Object.<string,*>=} options Builder options, defaults to global options set on ProtoBuf
      * @return {!ProtoBuf.Builder} Builder
      * @expose
      */
-    ProtoBuf.newBuilder = function (options) {
+    ProtoBuf.newBuilder = function(options) {
         options = options || {};
-        if (typeof options['convertFieldsToCamelCase'] === UND)
+        if (typeof options['convertFieldsToCamelCase'] === 'undefined')
             options['convertFieldsToCamelCase'] = ProtoBuf.convertFieldsToCamelCase;
-        if (typeof options['populateAccessors'] === UND)
+        if (typeof options['populateAccessors'] === 'undefined')
             options['populateAccessors'] = ProtoBuf.populateAccessors;
         return new ProtoBuf.Builder(options);
     };
@@ -8662,10 +10016,10 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
      * @throws {Error} If the definition cannot be parsed or built
      * @expose
      */
-    ProtoBuf.loadJson = function (json, builder, filename) {
+    ProtoBuf.loadJson = function(json, builder, filename) {
         if (typeof builder === 'string' || (builder && typeof builder["file"] === 'string' && typeof builder["root"] === 'string'))
             filename = builder,
-                builder = null;
+            builder = null;
         if (!builder || typeof builder !== 'object')
             builder = ProtoBuf.newBuilder();
         if (typeof json === 'string')
@@ -8673,6 +10027,22 @@ function __ProtoBuf(ByteBuffer, isCommonJS) {
         builder["import"](json, filename);
         builder.resolveAll();
         return builder;
+    };
+
+    /**
+     * Loads a .json file and returns the Builder.
+     * @param {string|!{root: string, file: string}} filename Path to json file or an object specifying 'file' with
+     *  an overridden 'root' path for all imported files.
+     * @param {function(?Error, !ProtoBuf.Builder=)=} callback Callback that will receive `null` as the first and
+     *  the Builder as its second argument on success, otherwise the error as its first argument. If omitted, the
+     *  file will be read synchronously and this function will return the Builder.
+     * @param {ProtoBuf.Builder=} builder Builder to append to. Will create a new one if omitted.
+     * @return {?ProtoBuf.Builder|undefined} The Builder if synchronous (no callback specified, will be NULL if the
+     *   request has failed), else undefined
+     * @expose
+     */
+    ProtoBuf.loadJsonFile = function(filename, callback, builder) {
+
     };
 
     return ProtoBuf;

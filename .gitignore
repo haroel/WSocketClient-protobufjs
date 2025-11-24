@@ -23,4 +23,6 @@ node_modules/
 #//////////////////////////
 .idea/
 
+temp_dts
+
 package-lock.json

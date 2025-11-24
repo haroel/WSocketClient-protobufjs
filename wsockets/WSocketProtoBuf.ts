@@ -7,22 +7,65 @@ let traceError = function (...args) {
     console.error("WSocketProtoBuf", ...args);
 }
 
-function longToNumber(obj: any, protobufLong: any) {
+
+const isMap = function(protobuf, val){
+    return val instanceof protobuf.Map;
+}
+
+const isLong = function(protobuf, val){
+    return protobuf.Long.isLong(val);
+}
+
+/**
+ * 是否应该递归
+ * @param obj 
+ * @returns 
+ */
+function shouldRecurse(obj: any){
+
+
+
+    return typeof obj === "object" && obj !== null && !Array.isArray(obj);
+}
+
+function longToNumber(obj: any, protobuf: any, visited: Set<any> = new Set()) {
     if (obj === null || obj === undefined) return;
+    
+    // 防止循环引用导致死循环
+    if (visited.has(obj)) return;
+    
+    // 跳过不应该递归的对象
+    if (!shouldRecurse(obj)) return;
+    
+    visited.add(obj);
+    
     if (Array.isArray(obj)) {
         for (let i = 0; i < obj.length; i++) {
-            if (protobufLong.isLong(obj[i])) {
+            if (isLong( protobuf,obj[i])) {
                 obj[i] = obj[i].toNumber();
-            } else if (typeof obj[i] === "object" && obj[i] !== null) {
-                longToNumber(obj[i], protobufLong);
+            } else if (shouldRecurse(obj[i])) {
+                if (isMap(protobuf, obj[i])) {
+                    obj[i].forEach((value: any, key: any) => {
+                        if (isLong(protobuf, value)) {
+                            value = value.toNumber();
+                        } else if (shouldRecurse(value)) {
+                            longToNumber(value, protobuf, visited);
+                        }
+                    });
+                } else {
+                    longToNumber(obj[i], protobuf, visited);
+                }
             }
         }
-    } else if (typeof obj === "object") {
+    } else if (obj instanceof protobuf.Map){
+        return obj;
+    }
+    else if (typeof obj === "object") {
         for (const key of Object.keys(obj)) {
-            if (protobufLong.isLong(obj[key])) {
+            if (protobuf.Long.isLong(obj[key])) {
                 obj[key] = obj[key].toNumber();
-            } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                longToNumber(obj[key], protobufLong);
+            } else if (shouldRecurse(obj[key])) {
+                longToNumber(obj[key], protobuf, visited);
             }
         }
     }
@@ -53,14 +96,30 @@ export class WSocketProtoBuf {
     }
 
     public setConfig(protoName: string, config: {
+        package?: string,
         proto_define: any,
         proto_configs: Map<number, any>
     }) {
-        this.protoPackage = config.proto_define.package;
+        this.protoPackage = config.package || "";
+        this.protoPackage = "GameFramework.Protobuf"
         this.proto_define = config.proto_define;
         this.proto_configs = config.proto_configs;
-        // 加载 JSON
-        let result = this.protobuf.loadJson(this.proto_define, this.Builder, protoName);
+        
+        // 新格式：proto_define 是 { "文件名.proto": "proto内容字符串" }
+        if (typeof this.proto_define === 'object' && !this.proto_define.package) {
+            // 遍历所有 proto 文件字符串，使用 loadProto 加载
+            for (const [filename, protoString] of Object.entries(this.proto_define)) {
+                if (typeof protoString === 'string') {
+                    trace(`Loading proto: ${filename}`);
+                    this.protobuf.loadProto(protoString as string, this.Builder, filename);
+                }
+            }
+        } else {
+            // 旧格式（兼容）：proto_define 是 loadJson 格式的对象
+            this.protoPackage = this.proto_define.package;
+            this.protobuf.loadJson(this.proto_define, this.Builder, protoName);
+        }
+        
         // 验证 build 是否能找到 package
         let root = this.Builder.build(); // 获取根对象        
         let packageBuild = this.Builder.build(this.protoPackage);
@@ -84,7 +143,7 @@ export class WSocketProtoBuf {
         }
         return 0;
     }
-    private getMessage(msgName: string) {
+    public getMessage(msgName: string) {
         const packageObj = this.Builder.build(this.protoPackage);
         if (packageObj) {
             let Message = packageObj[msgName];
@@ -179,9 +238,12 @@ export class WSocketProtoBuf {
         if (Message) {
             let dataResponse = Message.decode(buffer);
             // 递归循环遍历dataResponse的值， 判断值是否是long，然后调用toNumber();
-            longToNumber(dataResponse, this.protobuf.Long);
+            longToNumber(dataResponse, this.protobuf);
             return dataResponse;
         }
         return null;
+    }
+    public isLong(val){
+        return this.protobuf.Long.isLong(val);
     }
 }

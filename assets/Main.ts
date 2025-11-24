@@ -5,6 +5,15 @@ import { DEBUG } from 'cc/env';
 
 // 声明全局 WSocketClient（来自插件）
 
+const sendPromise = function(msgName: string, opts: any){
+    let wsocketClient = WSocketClient.getInstance();
+    return new Promise((resolve,reject)=>{
+        wsocketClient.send(msgName, opts, (msgName: string, response: any) => {
+            resolve(response);
+        });
+    })
+}
+
 @ccclass('Main')
 export class Main extends cc.Component {
 
@@ -16,7 +25,7 @@ export class Main extends cc.Component {
 
     start() {
         /** 测试服 */
-        const wsUrl = "ws://192.168.230.150:30000/websocket";
+        const wsUrl = "ws://124.221.100.246:8081/websocket";
         let wsocketClient = WSocketClient.getInstance();
         // 打印WSocketClient库版本
         this.addLog("WSocketClient Version :" + WSocketClient.VERSION);
@@ -33,7 +42,7 @@ export class Main extends cc.Component {
             self.addLog("onStateChange 连接状态 :" + JSON.stringify(info));
         };
         wsocketClient.config.onHeartbeat = (heartbeat: any) => {
-            self.addLog("onHeartbeat 心跳 :" + JSON.stringify(heartbeat.data));
+            // self.addLog("onHeartbeat 心跳 :" + JSON.stringify(heartbeat.data));
         };
         wsocketClient.config.onAutoReconnectStart = (autoReconnectStart: any) => {
             self.addLog("onAutoReconnectStart 自动重连开始 :" + autoReconnectStart);
@@ -80,13 +89,41 @@ export class Main extends cc.Component {
         wsocketClient.connect(wsUrl, (success, client) => {
             if (success) {
                 this.addLog("连接成功,发送登录请求");
-                wsocketClient.send("LoginReq", { accountId: "accountId11111" }, (msgName: string, response: any) => {
-                    this.addLog(" - 登录结果 :" + JSON.stringify(response));
-                });
+                this.sendReqs()
             } else {
                 this.addLog("ws 连接失败");
             }
         });
+    }
+
+    private async sendReqs(){
+        {
+            let res = await sendPromise("LoginReq", {openId: "123445566"});
+            console.log(res);
+            this.addLog(" - LoginResp :" + JSON.stringify(res));
+        }
+        let basicData = {
+            nick: "hehao1",
+            icon: "1",
+            extra: "test",
+        }
+        let roomId = "73000012";
+        {
+            let res = await sendPromise("CreateRoomReq", {basicData: basicData});
+            this.addLog(" - CreateRoomResp :" + JSON.stringify(res));
+            roomId = (res as any).data["roomId"];
+        }
+        {
+            let res = await sendPromise("EnterRoomReq", {roomId:roomId, basicData: basicData});
+            console.log(res);
+            this.addLog(" - EnterRoomResp :");
+        }
+        {
+            let res = await sendPromise("QueryRoomReq", {roomId:roomId, reconnect: false});
+            console.log(res);
+            this.addLog(" - QueryRoomResp :" );
+        }
+
     }
 
     private addLog(log: string, showError:boolean = false) {

@@ -26,7 +26,7 @@ const __ping_msg = ['', 'PingReq', 'PingResp'];
 export class WSocketClient {
 
     /** WSocketClient 版本 */
-    public static readonly VERSION = '1.4.7';
+    public static readonly VERSION = '1.4.8';
 
     /******************** 状态定义 ********************/
     /**
@@ -271,6 +271,15 @@ export class WSocketClient {
 
     private _isInReconnect = false;
 
+    /**
+     * 是否为Long（64位）类型
+     * 调用val.toNumber()将自动转换为number类型
+     * @param val 
+     * @returns 
+     */
+    public isLong(val) {
+        return this.protobufUtil.isLong(val);
+    }
     /**
      * 重置所有状态和数据
      * 关闭连接、清空所有回调、停止定时器、重置所有内部状态

@@ -399,6 +399,109 @@ export const proto_config = {
 }
 ```
 
+## Protobuf 消息对象组装指南
+
+在使用 `client.send()` 发送消息时，需要根据 `.proto` 文件中定义的消息结构来构造 JavaScript 对象。由于 JavaScript 是弱类型语言，`protobufjs` 对对象结构有一定要求。
+
+### 1. 基本类型赋值
+
+对于 `int32`, `string`, `bool` 等基本类型，直接赋值即可。
+
+**Proto 定义:**
+```protobuf
+message LoginReq {
+    string accountId = 1;
+    int32 age = 2;
+    bool isGuest = 3;
+}
+```
+
+**JS 对象:**
+```javascript
+const loginData = {
+    accountId: "user123",
+    age: 18,
+    isGuest: false
+};
+client.send("LoginReq", loginData, ...);
+```
+
+### 2. 嵌套消息 (Nested Message)
+
+如果消息中包含其他消息类型，需要使用嵌套对象。
+
+**Proto 定义:**
+```protobuf
+message UserInfo {
+    string name = 1;
+}
+
+message PlayerInfo {
+    int64 uid = 1;
+    UserInfo info = 2; // 嵌套 UserInfo
+}
+```
+
+**JS 对象:**
+```javascript
+const playerData = {
+    uid: 10001,
+    info: {
+        name: "PlayerOne"
+    }
+};
+client.send("PlayerInfo", playerData, ...);
+```
+
+### 3. 数组 (Repeated)
+
+对于 `repeated` 修饰的字段，使用数组赋值。
+
+**Proto 定义:**
+```protobuf
+message TaskList {
+    repeated int32 taskIds = 1;
+    repeated string tags = 2;
+}
+```
+
+**JS 对象:**
+```javascript
+const taskData = {
+    taskIds: [101, 102, 103], // 整数数组
+    tags: ["daily", "urgent"] // 字符串数组
+};
+```
+
+### 4. Map 类型
+
+`map` 类型对应 JavaScript 的对象（Object）。
+
+**Proto 定义:**
+```protobuf
+message Inventory {
+    // key: 物品ID, value: 数量
+    map<int32, int32> items = 1;
+}
+```
+
+**JS 对象:**
+```javascript
+const inventoryData = {
+    items: {
+        1001: 5,  // 物品ID 1001 有 5 个
+        1002: 10
+    }
+};
+```
+
+### 5. 注意事项
+
+1. **字段名大小写**：必须与 `.proto` 文件中定义的字段名完全一致（大小写敏感）。
+2. **类型匹配**：尽量保证 JS 类型与 Proto 类型一致（如 string 对应 string，number 对应 int/float）。
+3. **空值处理**：如果字段是 `optional`，可以不传，protobuf 会使用默认值（数字为0，字符串为空串，布尔为false）。
+4. **64位整数**：对于 `int64`/`uint64`，可以使用 `number` (如果数值较小)，或者使用 `Long` 对象，或者字符串（protobufjs 支持字符串转 int64）。
+
 ## 开发
 
 1. 修改`.proto`或.csv配置，必须重新运行一遍`_convert.bat`重新生成`proto.ts`

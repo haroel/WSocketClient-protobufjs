@@ -62,29 +62,60 @@ function findProtoTsFiles(dir, fileList = []) {
 }
 
 /**
- * 调用 pbjs 将 proto 文件转换为 JSON
+ * 最小化 proto 文件内容（移除注释和多余空白）
  */
-function convertProtoToJson(protoFiles, outputFile) {
+function minifyProtoContent(content) {
+    // 移除单行注释 //
+    content = content.replace(/\/\/.*$/gm, '');
+    // 移除多行注释 /* */
+    content = content.replace(/\/\*[\s\S]*?\*\//g, '');
+    // 移除多余的空白行（保留一个换行）
+    content = content.replace(/\n\s*\n+/g, '\n');
+    // 移除行首尾空白
+    content = content.split('\n').map(line => line.trim()).join('\n');
+    // 移除首尾空白
+    content = content.trim();
+    return content;
+}
+
+/**
+ * 读取所有 proto 文件并生成 proto_define 对象
+ */
+function loadProtoFiles(protoFiles) {
     if (protoFiles.length === 0) {
         throw new Error('未找到任何 proto 文件');
     }
 
     console.log(`[处理] 找到 ${protoFiles.length} 个 proto 文件:`);
+    
+    const protoDefine = {};
+    let packageName = '';
+    
     protoFiles.forEach(file => {
-        console.log(`  - ${path.basename(file)}`);
+        const fileName = path.basename(file);
+        console.log(`  - ${fileName}`);
+        
+        // 读取文件内容
+        const content = fs.readFileSync(file, 'utf8');
+        
+        // 提取包名（取第一个文件的包名）
+        if (!packageName) {
+            const packageMatch = content.match(/package\s+([\w.]+)\s*;/);
+            if (packageMatch) {
+                packageName = packageMatch[1];
+            }
+        }
+        
+        // 最小化内容
+        const minified = minifyProtoContent(content);
+        
+        // 以文件名为 key 存储
+        protoDefine[fileName] = minified;
     });
 
-    // 构建 pbjs 命令
-    const protoFilesStr = protoFiles.map(f => `"${f}"`).join(' ');
-    const command = `pbjs -t json ${protoFilesStr} -o "${outputFile}"`;
-
-    console.log(`[转换] 正在转换为 JSON...`);
-    try {
-        execSync(command, { stdio: 'inherit', cwd: SCRIPT_DIR });
-        console.log(`[成功] JSON 文件已生成: ${path.basename(outputFile)}`);
-    } catch (error) {
-        throw new Error(`pbjs 转换失败: ${error.message}`);
-    }
+    console.log(`[成功] Proto 文件已加载，package: "${packageName}"`);
+    
+    return { protoDefine, packageName };
 }
 
 /**
@@ -200,99 +231,32 @@ function getTimestamp() {
 }
 
 /**
- * 将 pbjs 生成的反射格式 JSON 转换为旧版 loadJson 兼容的定义格式。
- * @param {object} reflectionJson The JSON output from `pbjs -t json`.
- * @returns {{definition: object, packageName: string}} The definition JSON and package name.
+ * 检查所有 proto 文件的包名是否一致
  */
-function convertReflectionToDefinition(reflectionJson) {
-    let packageName = '';
-    let mainNamespace = null;
+function validatePackageNames(protoFiles) {
     const packageNames = new Set();
-
-    // 递归查找所有包含消息/枚举定义的命名空间
-    function findPackageNames(node, currentPath) {
-        const children = node.nested || {};
-        
-        // 当前节点是否是一个纯粹的 Namespace（不是 Message/Enum）
-        // 避免把 Message 内部的 Nested Message 误判为新包
-        const isNamespace = !node.fields && !node.values;
-        
-        // 检查当前节点是否直接包含 Message 或 Enum
-        const hasDirectDefinitions = isNamespace && Object.values(children).some(child => child && (child.fields || child.values));
-
-        if (hasDirectDefinitions) {
-            const pkgName = currentPath.join('.');
-            packageNames.add(pkgName);
-            // 记录第一个找到的 namespace 用于后续生成代码（假设包名一致时，这就足够了）
-            if (!mainNamespace) {
-                mainNamespace = node;
-            }
+    
+    protoFiles.forEach(file => {
+        const content = fs.readFileSync(file, 'utf8');
+        const packageMatch = content.match(/package\s+([\w.]+)\s*;/);
+        if (packageMatch) {
+            packageNames.add(packageMatch[1]);
         }
-        
-        // 继续递归查找子节点
-        // 只递归那些本身不是 Message/Enum 的节点
-        for (const key in children) {
-            const child = children[key];
-            if (child && child.nested && !child.fields && !child.values) {
-                findPackageNames(child, [...currentPath, key]);
-            }
-        }
-    }
-
-    findPackageNames(reflectionJson, []);
-
-    if (packageNames.size === 0) {
-        throw new Error("在反射JSON中找不到包含消息/枚举定义的命名空间。");
-    }
-
+    });
+    
     if (packageNames.size > 1) {
         const packages = Array.from(packageNames).join(', ');
         throw new Error(`检测到多个不一致的包名 (Package Names): [${packages}]。\n请检查所有 .proto 文件的 package 声明是否一致。`);
     }
-
-    packageName = Array.from(packageNames)[0];
-
-    const definition = {
-        package: packageName,
-        messages: [],
-        enums: [],
-        options: mainNamespace.options || {},
-    };
-
-    const items = mainNamespace.nested || {};
-
-    for (const name in items) {
-        const item = items[name];
-        if (!item) continue;
-
-        if (item.fields) { // Message
-            const fields = Object.entries(item.fields).map(([fieldName, fieldData]) => {
-                const field = {
-                    rule: fieldData.rule || (fieldData.repeated ? 'repeated' : 'optional'),
-                    type: fieldData.type,
-                    name: fieldName,
-                    id: fieldData.id
-                };
-                if (fieldData.options) field.options = fieldData.options;
-                return field;
-            });
-            definition.messages.push({ name: name, fields: fields });
-        } else if (item.values) { // Enum
-            definition.enums.push({
-                name: name,
-                values: Object.entries(item.values).map(([valueName, id]) => ({ name: valueName, id: id }))
-            });
-        }
-    }
-    return { definition, packageName };
 }
 
 
 /**
  * 生成 proto.ts 文件
  */
-function generateProtoTs(definitionJson, packageName, configs) {
-    const protoDefineStr = jsonToTsString(definitionJson);
+function generateProtoTs(protoDefine, packageName, configs) {
+    // 生成 proto_define 对象字符串
+    const protoDefineStr = jsonToTsString(protoDefine);
 
     // 生成 configs 数组代码
     const configsStr = configs.map(config => {
@@ -306,7 +270,9 @@ function generateProtoTs(definitionJson, packageName, configs) {
 /** 
  * 注意：该脚本由 proto-tools/convert 工具生成，请勿手动修改！
  * 生成时间: ${timestamp} 
- * 工具版本: ${VERSION} **/
+ * 工具版本: ${VERSION} 
+ * proto_define 格式：{ "文件名.proto": "proto内容字符串" }
+ **/
 
 const proto_define = ${protoDefineStr};
 
@@ -323,7 +289,7 @@ for (let item of configs) {
   proto_configs.set(item[0], item);
 }
 export const proto_config = {
-  protoName: "proto.json",
+  package: "${packageName}",
   proto_define: proto_define,
   proto_configs: proto_configs
 }
@@ -348,28 +314,23 @@ function main() {
             throw new Error('proto-tools 目录下未找到任何 .proto 文件');
         }
 
-        // 2. 转换为 JSON
-        convertProtoToJson(protoFiles, TEMP_JSON);
+        // 2. 验证包名一致性
+        console.log('[检查] 验证 package 声明...');
+        validatePackageNames(protoFiles);
+        console.log('[成功] 所有 proto 文件的 package 声明一致\n');
+
+        // 3. 加载并最小化 proto 文件
+        const { protoDefine, packageName } = loadProtoFiles(protoFiles);
         console.log('');
 
-        // 3. 读取 JSON
-        console.log('[读取] JSON 文件...');
-        const reflectionJson = readJsonFile(TEMP_JSON);
-        console.log('[成功] JSON 文件读取完成\n');
-
-        // 4. 将反射格式转换为定义格式
-        console.log('[转换] 正在转换 JSON 格式以兼容 loadJson...');
-        const { definition, packageName } = convertReflectionToDefinition(reflectionJson);
-        console.log(`[成功] JSON 格式已转换, package: "${packageName}"\n`);
-
-        // 5. 解析 CSV
+        // 4. 解析 CSV
         console.log('[解析] ProtoConfig.csv...');
         const configs = parseCsvFile(CSV_FILE);
         console.log('');
 
-        // 6. 生成 TypeScript 内容
+        // 5. 生成 TypeScript 内容
         console.log('[生成] proto.ts 内容...');
-        const tsContent = generateProtoTs(definition, packageName, configs);
+        const tsContent = generateProtoTs(protoDefine, packageName, configs);
         console.log('[成功] TypeScript 内容已生成\n');
 
         // 7. 搜索目标文件并写入
@@ -394,10 +355,10 @@ function main() {
             console.log('[成功] 所有找到的 proto.ts 文件已更新。\n');
         }
 
-        // 8. 清理临时文件
+        // 6. 清理临时文件（如果存在旧的 JSON 文件）
         if (fs.existsSync(TEMP_JSON)) {
             fs.unlinkSync(TEMP_JSON);
-            console.log('[清理] 临时文件已删除');
+            console.log('[清理] 旧的临时 JSON 文件已删除');
         }
 
         console.log('\n========================================');
